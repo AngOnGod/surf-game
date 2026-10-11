@@ -78,10 +78,12 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
   // collision brushes: world + static solid brush entities
   const B = lump(18), S = lump(19);
   const keep = new Map<number, { org: Vec; hidden: boolean }>([...brushesOf(models[0].headnode)].map(b => [b, { org: [0, 0, 0], hidden: false }])); // brush -> model origin
+  const shown = new Map<number, Vec>(); // drawn but never solid: func_illusionary (e.g. glass laid over an invisible clip ramp), never-solid brushes
   for (const e of entities) {
-    if (!STATIC_SOLID.has(e.classname) || e.solidity === '1' || !modelOf(e)) continue;
-    const hidden = e.rendermode === '10' || (!!e.rendermode && e.rendermode !== '0' && e.renderamt === '0'); // solid but not drawn
-    brushesOf(modelOf(e)!.headnode).forEach(b => keep.set(b, { org: vec(e.origin), hidden }));
+    if (!modelOf(e)) continue;
+    const hidden = e.rendermode === '10' || (!!e.rendermode && e.rendermode !== '0' && e.renderamt === '0'); // not drawn
+    if (STATIC_SOLID.has(e.classname) && e.solidity !== '1') brushesOf(modelOf(e)!.headnode).forEach(b => keep.set(b, { org: vec(e.origin), hidden }));
+    else if ((e.classname === 'func_illusionary' || STATIC_SOLID.has(e.classname)) && !hidden) brushesOf(modelOf(e)!.headnode).forEach(b => shown.set(b, vec(e.origin)));
   }
   const brushPlanes = (b: number, org: Vec) => { // a brush's sides (minus compiler bevels; the engine adds its own), moved by org
     const o = B.ofs + b * 12, first = i32(o), count = i32(o + 4), sides: { pl: [number, number, number, number]; ti: number }[] = [];
@@ -94,13 +96,20 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
     return { contents: i32(o + 8), sides };
   };
   const brushes: BrushDef[] = [];
+  const seeThrough = (ti: number) => ti >= 0 && !!(i32(TI.ofs + ti * 72 + 64) & 0x10); // SURF_TRANS: glass and the like
+  const tint = (c: number | null) => (c !== null && ((c >> 16) + ((c >> 8) & 255) + (c & 255)) < 300 ? 0xd8e2ec : c); // dark see-through textures (grids) read as light glass
   for (const [b, { org, hidden }] of [...keep].sort((x, y) => x[0] - y[0])) {
     const { contents, sides } = brushPlanes(b, org);
     if (!(contents & SOLID)) continue;
-    // clip-only brushes are invisible; windows (glass, grids: solid to players too) are drawn see-through
-    const glass = !(contents & 0x1) && !!(contents & 0x2);
-    const tint = (c: number | null) => (glass && c !== null && ((c >> 16) + ((c >> 8) & 255) + (c & 255)) < 300 ? 0xd8e2ec : c); // dark see-through textures (grids) read as light glass
-    brushes.push({ type: 'planes', planes: sides.map(s => s.pl), faceColors: sides.map(s => ((contents & 0x1 || glass) && !hidden ? tint(colorOf(s.ti)) : null)), ...(glass && { glass }) });
+    // clip-only brushes are invisible; windows (glass, grids: solid to players too) and translucent textures are drawn see-through
+    const glass = (!(contents & 0x1) && !!(contents & 0x2)) || sides.some(s => seeThrough(s.ti) && colorOf(s.ti) !== null);
+    brushes.push({ type: 'planes', planes: sides.map(s => s.pl), faceColors: sides.map(s => ((contents & 0x1 || contents & 0x2) && !hidden ? (glass ? tint(colorOf(s.ti)) : colorOf(s.ti)) : null)), ...(glass && { glass }) });
+  }
+  for (const [b, org] of [...shown].sort((x, y) => x[0] - y[0])) {
+    const { sides } = brushPlanes(b, org), colors = sides.map(s => colorOf(s.ti));
+    if (colors.every(c => c === null)) continue;
+    const glass = sides.some(s => seeThrough(s.ti) && colorOf(s.ti) !== null);
+    brushes.push({ type: 'planes', planes: sides.map(s => s.pl), faceColors: glass ? colors.map(tint) : colors, nonsolid: true, ...(glass && { glass }) });
   }
 
   // gameplay entities

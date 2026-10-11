@@ -12,7 +12,7 @@ export interface Box { min: Vec; max: Vec }
 export type BrushDef =
   | { type: 'box'; pos: Vec; size: Vec; yaw?: number; color?: number }
   | { type: 'ramp'; pos: Vec; length: number; width: number; height: number; yaw?: number; pitch?: number; sides?: 'both' | 'left' | 'right'; color?: number }
-  | { type: 'planes'; planes: [number, number, number, number][]; color?: number; faceColors?: (number | null)[]; glass?: boolean }; // n·x <= d, outward normals; null colour = not drawn; glass: drawn see-through
+  | { type: 'planes'; planes: [number, number, number, number][]; color?: number; faceColors?: (number | null)[]; glass?: boolean; nonsolid?: boolean }; // n·x <= d, outward normals; null colour = not drawn; glass: drawn see-through; nonsolid: drawn only
 
 export interface MapDef {
   id: string; name: string; blurb?: string; order?: number;
@@ -118,7 +118,7 @@ const rotZ = (v: Vec, a: number): Vec => { const c = cos(a * DEG), s = sin(a * D
 const rotY = (v: Vec, a: number): Vec => { const c = cos(a * DEG), s = sin(a * DEG); return [v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c]; };
 
 export function buildBrush(d: BrushDef): Brush {
-  if (d.type === 'planes') return { ...makeBrush(d.planes.map(([x, y, z, w]) => ({ n: [x, y, z], d: w })), d.color ?? 0x8a8f98, d.faceColors), glass: d.glass };
+  if (d.type === 'planes') return { ...makeBrush(d.planes.map(([x, y, z, w]) => ({ n: [x, y, z], d: w })), d.color ?? 0x8a8f98, d.faceColors), glass: d.glass, nonsolid: d.nonsolid };
   let pts: Vec[];
   if (d.type === 'box') {
     const [x, y, z] = d.size;

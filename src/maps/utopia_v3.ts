@@ -19,8 +19,8 @@ const arc = (c: [number, number], r: number, a0: number, a1: number, z0: number,
 };
 /** Autopilot line (+y side): stations of guide points, each with a riding height ramping h0 -> h1 (0 = a face's
  *  bottom edge, 1 = its top; -1 = keep the point as an in-air waypoint). Heights tuned by search so the line holds
- *  from either tick parity (see test/). It is verified up to the booster: past it the map turns back underneath,
- *  through a lower entrance into the long final descent to the END room, and that link isn't mapped yet. */
+ *  from either tick parity (see test/). It is verified up to the booster: past it a glass bowl (see-through panels over an invisible
+ *  clip ramp) turns the map back underneath, through a lower entrance into the long final descent to the END room, and that link isn't mapped yet. */
 export const STATIONS: { g: Vec[]; h: [number, number] }[] = [
   { g: [[-13700, 200, 13060]], h: [-1, -1] }, // strafe off the spawn's centre line: dropping straight down lands on the ridge's flat top
   { g: line([-13350, 220, 11780], [-12033, 190, 10591], [-10767, 170, 9993], [-9450, 150, 9750]), h: [0.62, 0.8] },

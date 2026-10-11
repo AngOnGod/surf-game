@@ -18,7 +18,7 @@ export const norm = (a: Vec): Vec => { const l = len(a); return l > 0 ? scale(a,
 
 export interface Plane { n: Vec; d: number } // solid where n·x <= d
 export interface Face { n: Vec; verts: Vec[]; color: number | null } // null: not drawn
-export interface Brush { planes: Plane[]; faces: Face[]; min: Vec; max: Vec; color: number; stamp?: number; glass?: boolean }
+export interface Brush { planes: Plane[]; faces: Face[]; min: Vec; max: Vec; color: number; stamp?: number; glass?: boolean; nonsolid?: boolean }
 
 const AXES: Vec[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 const ON = 1e-3;
@@ -100,6 +100,7 @@ function gridOf(world: Brush[]): Grid {
   if (g) return g;
   g = { cells: new Map(), big: [] };
   for (const b of world) {
+    if (b.nonsolid) continue; // drawn only
     const lo = b.min.map(v => Math.floor(v / CELL)), hi = b.max.map(v => Math.floor(v / CELL));
     if ((hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1) > 2048) { g.big.push(b); continue; }
     for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) {
@@ -118,7 +119,7 @@ export function trace(world: Brush[], start: Vec, end: Vec, mins: Vec, maxs: Vec
   const hi = [0, 1, 2].map(i => Math.max(start[i], end[i]) + maxs[i] + 1);
   const g = gridOf(world), stamp = ++traceStamp;
   const test = (b: Brush) => {
-    if (b.stamp === stamp) return;
+    if (b.stamp === stamp || b.nonsolid) return;
     b.stamp = stamp;
     if (b.min[0] > hi[0] || b.max[0] < lo[0] || b.min[1] > hi[1] || b.max[1] < lo[1] || b.min[2] > hi[2] || b.max[2] < lo[2]) return;
     clipBoxToBrush(tr, b, start, end, mins, maxs);
