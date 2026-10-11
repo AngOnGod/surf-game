@@ -150,6 +150,7 @@ export type GameEvent =
 
 const freshTimer = (state: RunState = 'idle'): Timer => ({ state, time: 0, splits: [], practice: false });
 interface Saved { origin: Vec; vel: Vec; yaw: number; pitch: number; ducked: boolean }
+export interface Snapshot { p: Player; run: Timer; stage: Timer & { index: number }; section: number; trail: boolean; name: string; inPush: boolean[] }
 
 export class Session {
   world: Brush[];
@@ -205,6 +206,10 @@ export class Session {
   }
 
   snap() { this.prev = { origin: this.p.origin, view: this.p.viewOffset }; }
+
+  /** The whole state a replay starts from (a recorded run, a planner's node). */
+  snapshot(): Snapshot { return structuredClone({ p: this.p, run: this.run, stage: this.stage, section: this.section, trail: this.trail, name: this.name, inPush: this.inPush }); }
+  restore(s: Snapshot) { Object.assign(this, structuredClone(s)); this.events.length = 0; this.snap(); }
 
   currentSpawn(): Spawn {
     if (this.def.stages) return this.def.stages[this.stage.index].spawn;

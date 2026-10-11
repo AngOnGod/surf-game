@@ -2,6 +2,7 @@
 // tool-assisted run, and keeps the best line start to finish. A run is stored as one move per block of ticks and
 // replayed exactly (the movement code gives the same result in every browser).
 import { type Cmd, type Player, DEG, NO_CMD, hlen } from './physics';
+import type { Snapshot } from './game';
 import { atan2 } from './fmath';
 
 /** Moves: the wish direction relative to the velocity's heading (degrees, + = left) on even and odd ticks; null: no
@@ -44,4 +45,17 @@ export function replay(run: string, tickrate: number, bot?: (p: Player) => Cmd) 
   const ms = decode(run), per = tickrate / BLOCK;
   let i = 0;
   return (p: Player): Cmd => { const m = ms[Math.floor(i++ / per)] ?? 0; return m === BOT ? bot!(p) : move(p, m); };
+}
+
+/** A run recorded in-game (E saves one): the session snapshot it starts from and each tick's view and keys. */
+export interface Demo { time: number; snap: Snapshot; ticks: [yaw: number, pitch: number, fwd: number, side: number, jump: number, duck: number][] }
+/** Replays a recorded run from its snapshot (Session.restore), then coasts. */
+export function replayDemo(ticks: Demo['ticks']) {
+  let i = 0;
+  return (p: Player): Cmd => {
+    const t = ticks[i++];
+    if (!t) return NO_CMD;
+    p.yaw = t[0]; p.pitch = t[1];
+    return { ...NO_CMD, fwd: t[2], side: t[3], jump: !!t[4], duck: !!t[5] };
+  };
 }

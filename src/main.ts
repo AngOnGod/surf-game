@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { type Cmd, type Player, type Settings, type Vec, DEFAULTS, NO_CMD, hlen, len, viewVectors } from './physics';
 import { type Box, type GameEvent, type MapDef, Session } from './game';
 import { makeBot } from './bot';
-import { replay } from './plan';
-import { RUNS } from './runs';
+import { type Demo, replay, replayDemo } from './plan';
+import { DEMOS, RUNS } from './runs';
 import { resolveMap } from './bsp';
 
 const MAPS = Object.values(import.meta.glob<{ default: MapDef }>('./maps/*.ts', { eager: true }))
@@ -182,6 +182,19 @@ let locked = false, debug = false, menuOpen = true, lastCmd: Cmd = NO_CMD;
 const keys = new Set<string>();
 let jumpTap = false, wheelJump = false;
 
+// Run recording: the view and keys of every tick since the last clean start (a timer starting, a checkpoint loaded,
+// noclip turned off), kept at a finish; E saves it as a file. The movement code is deterministic, so a replay from the
+// snapshot is exact (scratch/demo.test.ts): a human's line is ground truth the autopilot can be taught from.
+type Recorded = Demo & { map: string; tickrate: number; settings: Partial<Settings>; stage?: number; practice: boolean };
+let rec: Pick<Demo, 'snap' | 'ticks'> | null = null, demo: Recorded | null = null;
+const record = () => { rec = { snap: session.snapshot(), ticks: [] }; };
+function saveDemo() {
+  if (!demo) return flash('No finished run recorded yet');
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([JSON.stringify(demo)])), download: `${demo.map}@${demo.tickrate}${demo.stage === undefined ? '' : '-s' + (demo.stage + 1)}.demo.json` });
+  a.click(); URL.revokeObjectURL(a.href);
+  flash(`Saved ${a.download} to your downloads`);
+}
+
 let loading = false, pick: MapDef | null = null; // pick: a map whose file the player has to supply
 const resolved = new Map<string, MapDef>();
 const mapCache = () => caches.open('surf-maps'); // map files players supplied themselves, kept in this browser only
@@ -237,9 +250,10 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') jumpTap = true;
   else if (e.code === 'KeyR') { session.restart(); if (autopilot) startAutopilot(); }
   else if (e.code === 'KeyC') session.saveCheckpoint();
-  else if (e.code === 'KeyV') session.loadCheckpoint();
-  else if (e.code === 'KeyN') session.toggleNoclip();
+  else if (e.code === 'KeyV') { session.loadCheckpoint(); if (session.saved) record(); }
+  else if (e.code === 'KeyN') { session.toggleNoclip(); session.p.noclip ? (rec = null) : record(); }
   else if (e.code === 'KeyP') autopilot ? stopAutopilot() : startAutopilot();
+  else if (e.code === 'KeyE') saveDemo();
   else if (e.code === 'F3') debug = !debug;
 });
 addEventListener('keyup', e => keys.delete(e.code));
@@ -261,14 +275,17 @@ function readCmd(): Cmd {
   return { fwd: k('KeyW') - k('KeyS'), side: k('KeyD') - k('KeyA'), up: k('Space') - (duck ? 1 : 0), jump, duck, fast: !!(k('ShiftLeft') || k('ShiftRight')) };
 }
 
-function startAutopilot() { // a planned run if there is one for this map and tick rate (standard settings only), else the route follower
-  const planned = custom() ? undefined : RUNS[`${session.def.id}@${settings.tickrate}`], r = session.def.route;
-  if (!planned && !r) return flash('This map has no autopilot route');
+async function startAutopilot() { // a planned or recorded run if there is one for this map and tick rate (standard settings only), else the route follower
+  const key = `${session.def.id}@${settings.tickrate}`, planned = custom() ? undefined : RUNS[key], recorded = custom() ? undefined : DEMOS[key], r = session.def.route;
+  if (!planned && !recorded && !r) return flash('This map has no autopilot route');
   session.restart();
   session.assisted = true;
+  rec = null;
   const routeBot = (settle: boolean) => makeBot(r ?? [], session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle });
-  autopilot = planned ? replay(planned.run, settings.tickrate, routeBot(false)) : routeBot(true); // (planned runs hand some blocks to it)
-  flash(planned ? `Autopilot: its planned run, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
+  if (planned) autopilot = replay(planned.run, settings.tickrate, routeBot(false)); // (planned runs hand some blocks to it)
+  else if (recorded) { const d: Demo = await fetch(`runs/${key}.json`).then(r => r.json()); session.restore(d.snap); session.invalidate(); autopilot = replayDemo(d.ticks); } // (the snapshot's timer is already running: flag it)
+  else autopilot = routeBot(true);
+  flash(planned ? `Autopilot: its planned run, ${fmt(planned.time)} (P to stop)` : recorded ? `Autopilot: a recorded run, ${fmt(recorded)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }
 
@@ -287,6 +304,11 @@ function flash(html: string, ms = 2200) {
 const sectionName = (i: number) => session.def.stages?.[i]?.name ?? (i > 0 ? session.def.checkpoints?.[i - 1]?.name : undefined);
 function onEvent(e: GameEvent) {
   const id = session.def.id, pb: PB = store.get(pbKey(id), {});
+  if ((e.type === 'finish' || e.type === 'stage') && rec) { // finished cleanly since the recording started: keep it
+    demo = { map: id, tickrate: settings.tickrate, settings: Object.fromEntries(MOVEMENT.map(k => [k, settings[k]])) as Partial<Settings>, stage: e.type === 'stage' ? e.index : undefined, time: e.time, practice: e.practice, ...rec };
+    rec = null;
+    flash('Run recorded: E saves it as a file', 4000);
+  }
   if (e.type === 'msg') flash(e.text);
   else if (e.type === 'split' && !e.practice) {
     const ref = pb.splits?.[e.index];
@@ -407,7 +429,7 @@ const NUMS: [keyof Settings, string, number][] = [
 const BOOLS: [keyof Settings, string][] = [['rampfix', 'Rampbug fix (no dead stops on ramps, as on surf servers)'], ['bhopLimiter', 'Bunnyhop speed limiter (1.1 × max speed on jump)'], ['autobhop', 'Auto-bunnyhop (hold jump)'], ['trail', 'Rainbow trail (always on; some maps hand one out)']];
 const CONTROLS = [['Click', 'capture mouse'], ['W A S D', 'move / strafe'], ['Mouse', 'look'], ['Space / wheel', 'jump'], ['Ctrl', 'duck'],
   ['R', 'restart run'], ['C / V', 'save / load practice checkpoint (invalidates timer)'], ['N', 'noclip (Space/Ctrl up/down, Shift fast)'],
-  ['P', 'autopilot demo'], ['F3', 'debug overlay'], ['Esc', 'menu']];
+  ['P', 'autopilot demo'], ['E', 'save the last finished run as a file'], ['F3', 'debug overlay'], ['Esc', 'menu']];
 
 function show(screen: Screen | null) {
   menuOpen = !!screen;
@@ -476,7 +498,10 @@ let acc = 0, last = performance.now();
 const running = () => !menuOpen && !loading;
 function tick() {
   lastCmd = autopilot ? autopilot(session.p) : readCmd();
+  const p = session.p, r0 = session.run.state, s0 = session.stage.state;
+  rec?.ticks.push([p.yaw, p.pitch, lastCmd.fwd, lastCmd.side, +lastCmd.jump, +lastCmd.duck]);
   session.step(lastCmd);
+  if ((session.run.state === 'running' && r0 !== 'running') || (session.stage.state === 'running' && s0 !== 'running')) record(); // a timer just started
   for (const e of session.events.splice(0)) onEvent(e);
 }
 function frame(now: number) {
@@ -511,7 +536,7 @@ requestAnimationFrame(frame);
 if (import.meta.env.DEV) { // hooks for automated checks in the browser
   Object.assign(window, {
     surf: {
-      get session() { return session; }, settings, maps: MAPS, three: { THREE, scene, renderer, camera, get world() { return worldGroup; } },
+      get session() { return session; }, get demo() { return demo; }, save: saveDemo, settings, maps: MAPS, three: { THREE, scene, renderer, camera, get world() { return worldGroup; } },
       async play(id: string, auto = false) { show(null); await load(MAPS.find(m => m.id === id)!); if (auto) startAutopilot(); },
       cam(pos: Vec, yaw: number, pitch = 0) { const p = session.p; p.noclip = true; session.invalidate(); p.origin = pos; p.vel = [0, 0, 0]; p.yaw = yaw; p.pitch = pitch; session.snap(); draw(1, performance.now()); },
       advance(seconds: number) { for (let i = Math.round(seconds * settings.tickrate); i > 0; i--) tick(); draw(1, performance.now()); }, // runs while rAF is throttled
