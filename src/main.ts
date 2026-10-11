@@ -49,11 +49,11 @@ scene.add(sky);
 // world-space checker (128u) + grid lines (32u fine, 512u major) so speed and distance read at a glance
 const brushMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, // edges draw on top
-  uniforms: { fogColor: { value: HORIZON }, fogNear: { value: FOG_NEAR }, fogFar: { value: FOG_FAR } },
+  uniforms: { fogColor: { value: HORIZON }, fogNear: { value: FOG_NEAR }, fogFar: { value: FOG_FAR }, alpha: { value: 1 } },
   vertexShader: `attribute vec3 tint; varying vec3 vW, vN, vC; varying float vD;
     void main() { vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; vN = normal; vC = tint;
       vec4 v = viewMatrix * w; vD = -v.z; gl_Position = projectionMatrix * v; }`,
-  fragmentShader: `uniform vec3 fogColor; uniform float fogNear, fogFar; varying vec3 vW, vN, vC; varying float vD;
+  fragmentShader: `uniform vec3 fogColor; uniform float fogNear, fogFar, alpha; varying vec3 vW, vN, vC; varying float vD;
     float grid(vec2 uv, float s) { vec2 g = abs(fract(uv / s - .5) - .5) / fwidth(uv / s); return 1. - min(min(g.x, g.y), 1.); }
     void main() {
       vec3 n = normalize(vN), a = abs(n);
@@ -62,9 +62,11 @@ const brushMat = new THREE.ShaderMaterial({
       vec3 c = vC * mix(.88, 1.04, mod(cell.x + cell.y, 2.));
       c *= .6 + .4 * max(dot(n, normalize(vec3(.45, .3, .85))), 0.) + .08 * n.z;
       c *= 1. - .2 * grid(uv, 32.) * (1. - smoothstep(600., 2500., vD)) - .32 * grid(uv, 512.);
-      gl_FragColor = vec4(mix(c, fogColor, smoothstep(fogNear, fogFar, vD)), 1.);
+      gl_FragColor = vec4(mix(c, fogColor, smoothstep(fogNear, fogFar, vD)), alpha);
     }`,
 });
+const glassMat = Object.assign(brushMat.clone(), { transparent: true, depthWrite: false }); // windows: glass and grids
+glassMat.uniforms.alpha.value = 0.45;
 const edgeMat = new THREE.LineBasicMaterial({ color: 0x0b1220, transparent: true, opacity: 0.45 });
 let worldGroup = new THREE.Group(), failGroup = new THREE.Group();
 
@@ -81,22 +83,26 @@ function buildScene(s: Session) {
   worldGroup.traverse(o => { if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) o.geometry.dispose(); });
   scene.remove(worldGroup);
   worldGroup = new THREE.Group();
-  const pos: number[] = [], nrm: number[] = [], tint: number[] = [], edges: number[] = [], col = new THREE.Color();
+  const solid = { pos: [] as number[], nrm: [] as number[], tint: [] as number[] }, glass = { pos: [] as number[], nrm: [] as number[], tint: [] as number[] }, edges: number[] = [], col = new THREE.Color();
   for (const b of s.world) {
+    const m = b.glass ? glass : solid;
     for (const f of b.faces) {
       if (f.color === null) continue;
       col.set(f.color);
-      for (let i = 1; i + 1 < f.verts.length; i++) for (const v of [f.verts[0], f.verts[i], f.verts[i + 1]]) { pos.push(...v); nrm.push(...f.n); tint.push(col.r, col.g, col.b); }
+      for (let i = 1; i + 1 < f.verts.length; i++) for (const v of [f.verts[0], f.verts[i], f.verts[i + 1]]) { m.pos.push(...v); m.nrm.push(...f.n); m.tint.push(col.r, col.g, col.b); }
       f.verts.forEach((v, i) => edges.push(...v, ...f.verts[(i + 1) % f.verts.length]));
     }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-  g.setAttribute('tint', new THREE.Float32BufferAttribute(tint, 3));
+  for (const [m, mat] of [[solid, brushMat], [glass, glassMat]] as const) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(m.pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(m.nrm, 3));
+    g.setAttribute('tint', new THREE.Float32BufferAttribute(m.tint, 3));
+    worldGroup.add(new THREE.Mesh(g, mat));
+  }
   const eg = new THREE.BufferGeometry();
   eg.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3));
-  worldGroup.add(new THREE.Mesh(g, brushMat), new THREE.LineSegments(eg, edgeMat));
+  worldGroup.add(new THREE.LineSegments(eg, edgeMat));
   const d = s.def;
   if (!d.stages) { if (s.start) worldGroup.add(zoneMesh(s.start, 0x22c55e, 0.12)); if (s.end) worldGroup.add(zoneMesh(s.end, 0xef4444, 0.12)); }
   for (const st of d.stages ?? []) worldGroup.add(zoneMesh(st.start, 0x22c55e, 0.12), zoneMesh(st.end, 0xef4444, 0.12));

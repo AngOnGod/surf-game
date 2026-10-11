@@ -365,6 +365,20 @@ describe.skipIf(!existsSync(KITSUNE))('Source .bsp import (surf_kitsune)', () =>
     expect(def.fails!.filter(f => f.filter?.name === 'x').length).toBe(1); // ...which opens Red's hidden second exit
     expect(s.trail).toBe(false); // the trail waits in the secret room
   }, 60_000);
+  it('White (the last stage) goes through: a clear way from its start to its exit, touching no kill volume', async () => {
+    // a flood fill through free space (each step swept) shortened to clear segments; its walls include glass grids
+    const WAY: Vec[] = [[-15104, 14976, 10808], [-14592, 8064, 10808], [-14976, 7680, 10808], [-14848, 7552, 10808], [-14208, 6528, 8888], [-14208, 6784, 7992], [-14208, 5760, 6968], [-14208, 3840, 6200], [-10368, 3968, 6200], [-10368, 10240, 5816], [-10368, 10368, 5048], [-2560, 10368, 4152], [128, 10240, 4152], [0, 8576, 4152], [-640, 8192, 4152], [-2176, 8064, 4152], [-2176, 9088, 2232], [-1920, 9984, 2232], [-1152, 10624, 312], [1024, 10624, -5576], [8192, 10624, -7240], [8832, 10368, -7240], [10240, 10624, -7240], [11008, 10368, -7240], [14208, 10240, -9416], [14080, 10240, -9928], [13056, 10240, -10568], [-16000, 10240, -11848]];
+    const b = parseBsp(await read()), def = await load(), s = new Session(def, S), white = def.stages![8];
+    const touches = (p: Vec) => b.fails.some(f => p[0] + 16 > f.min[0] && p[0] - 16 < f.max[0] && p[1] + 16 > f.min[1] && p[1] - 16 < f.max[1] && p[2] + 72 > f.min[2] && p[2] < f.max[2]
+      && (!f.shape || f.shape.some(br => br.every(([a, c, e, d]) => Math.min(...[0, 1, 2, 3, 4, 5, 6, 7].map(k => a * (p[0] + (k & 1 ? 16 : -16)) + c * (p[1] + (k & 2 ? 16 : -16)) + e * (p[2] + (k & 4 ? 72 : 0)))) <= d))));
+    expect(Math.hypot(...([0, 1, 2].map(k => WAY[0][k] - white.spawn.pos[k])) as Vec)).toBeLessThan(200);
+    expect(WAY.at(-1)!.every((v, k) => v >= white.end.min[k] && v <= white.end.max[k])).toBe(true);
+    for (let i = 1; i < WAY.length; i++) {
+      const a = WAY[i - 1], c = WAY[i], t = trace(s.world, a, c, HULL_MIN, HULL_STAND), n = Math.ceil(len(c.map((v, k) => v - a[k]) as Vec) / 24);
+      expect(t.fraction === 1 && !t.startsolid, `segment ${i}`).toBe(true);
+      for (let k = 0; k <= n; k++) expect(touches(a.map((v, j) => v + ((c[j] - v) * k) / n) as Vec), `segment ${i}`).toBe(false);
+    }
+  }, 120_000);
   // the autopilot's line is verified stage by stage (the rest of the map is imported and playable, but unverified)
   const VERIFIED: Record<number, number[]> = { 128: [1, 2, 3, 4, 6], 64: [1, 2, 3] };
   for (const tickrate of [128, 64]) it(`autopilot finishes stages ${VERIFIED[tickrate].join(', ')} at ${tickrate} tick (either tick parity)`, async () => {
@@ -416,4 +430,50 @@ describe.skipIf(!existsSync(AIRCONTROL))('Source .bsp import (surf_aircontrol_ks
       expect(res, `parity ${par}`).toBe('ok');
     }
   }, 240_000);
+});
+
+const MESA = 'public/maps/surf_mesa.bsp';
+describe.skipIf(!existsSync(MESA))('Source .bsp import (surf_mesa)', () => {
+  const read = async () => { const b = readFileSync(MESA); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
+  const load = () => resolveMap(mapDefs.find(m => m.id === 'mesa')!, read);
+  it('spawns on the ground in its start zone; falls teleport back to the spawn room', async () => {
+    const def = await load(), s = new Session(def, S);
+    for (let i = 0; i < 64; i++) s.step(NO_CMD);
+    expect(s.p.onGround).toBe(true);
+    expect(s.p.origin.every((v, k) => v >= def.start!.min[k] && v <= def.start!.max[k])).toBe(true);
+    expect(def.fails!.filter(f => f.to && Math.abs(f.to.pos[2] - 10161) < 1).length).toBeGreaterThan(8);
+    expect(def.checkpoints!.length).toBe(6);
+  }, 60_000);
+  it('the whole course goes through: a clear way from the spawn room to the blast door, touching no kill volume', async () => {
+    // a flood fill through free space (each step swept) shortened to clear segments (it doesn't model gravity: it shows
+    // the course is connected, not that a given line through it is fast enough)
+    const WAY: Vec[] = [[-32, -480, 10272], [992, 5664, 9120], [992, 5664, 7584], [992, 8352, 7584], [1504, 11680, 7584], [2528, 14368, 7584], [14432, 14368, 7584], [14432, 4640, 5408], [14432, 4640, 4640], [14432, 1952, 4640], [14048, -224, 4512], [14048, -9312, 4512], [7776, -9312, 4256], [7776, -1888, 3104], [7776, 8480, 2336], [7776, 9248, 2336], [480, 9248, 2336], [480, -2912, -2144], [480, -6752, -3424], [480, -6752, -4704], [-32, -6752, -11360], [-32, 13984, -12128], [-32, 14112, -12256], [-32, 14368, -12256]];
+    const b = parseBsp(await read()), def = await load(), s = new Session(def, S);
+    const touches = (p: Vec) => b.fails.some(f => p[0] + 16 > f.min[0] && p[0] - 16 < f.max[0] && p[1] + 16 > f.min[1] && p[1] - 16 < f.max[1] && p[2] + 72 > f.min[2] && p[2] < f.max[2]
+      && (!f.shape || f.shape.some(br => br.every(([a, c, e, d]) => Math.min(...[0, 1, 2, 3, 4, 5, 6, 7].map(k => a * (p[0] + (k & 1 ? 16 : -16)) + c * (p[1] + (k & 2 ? 16 : -16)) + e * (p[2] + (k & 4 ? 72 : 0)))) <= d))));
+    expect(WAY[0].every((v, k) => v >= def.start!.min[k] - 300 && v <= def.start!.max[k] + 300)).toBe(true);
+    expect(Math.hypot(...([0, 1, 2].map(k => WAY.at(-1)![k] - (def.end!.min[k] + def.end!.max[k]) / 2)) as Vec)).toBeLessThan(300);
+    for (let i = 1; i < WAY.length; i++) {
+      const a = WAY[i - 1], c = WAY[i], t = trace(s.world, a, c, HULL_MIN, HULL_STAND), n = Math.ceil(len(c.map((v, k) => v - a[k]) as Vec) / 24);
+      expect(t.fraction === 1 && !t.startsolid, `segment ${i}`).toBe(true);
+      for (let k = 0; k <= n; k++) expect(touches(a.map((v, j) => v + ((c[j] - v) * k) / n) as Vec), `segment ${i}`).toBe(false);
+    }
+  }, 120_000);
+  // the autopilot's line is verified from the start through checkpoint 2 (the rest of the map is imported and playable)
+  it('autopilot reaches checkpoint 2 at 128 tick (either tick parity)', async () => {
+    const def = await load();
+    for (const par of [0, 1]) {
+      const s = new Session(def, S), bot = makeBot(def.route!, s.world, s.s, undefined, true, { flags: def.routeFlags, hazard: s.hazard });
+      if (par) s.step(NO_CMD);
+      let res = 'timeout', splits = 0;
+      for (let i = 0; i < 128 * 40 && res === 'timeout'; i++) {
+        s.step(bot(s.p));
+        const evs = s.events.splice(0);
+        splits += evs.filter(e => e.type === 'split').length;
+        if (evs.some(e => e.type === 'fail')) res = `fail at ${s.p.origin.map(Math.round)} (${splits} splits)`;
+        if (splits >= 2) res = 'ok';
+      }
+      expect(res, `parity ${par}`).toBe('ok');
+    }
+  }, 120_000);
 });

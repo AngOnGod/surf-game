@@ -97,8 +97,10 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
   for (const [b, { org, hidden }] of [...keep].sort((x, y) => x[0] - y[0])) {
     const { contents, sides } = brushPlanes(b, org);
     if (!(contents & SOLID)) continue;
-    // clip-only brushes are invisible
-    brushes.push({ type: 'planes', planes: sides.map(s => s.pl), faceColors: sides.map(s => (contents & 0x1 && !hidden ? colorOf(s.ti) : null)) });
+    // clip-only brushes are invisible; windows (glass, grids: solid to players too) are drawn see-through
+    const glass = !(contents & 0x1) && !!(contents & 0x2);
+    const tint = (c: number | null) => (glass && c !== null && ((c >> 16) + ((c >> 8) & 255) + (c & 255)) < 300 ? 0xd8e2ec : c); // dark see-through textures (grids) read as light glass
+    brushes.push({ type: 'planes', planes: sides.map(s => s.pl), faceColors: sides.map(s => ((contents & 0x1 || glass) && !hidden ? tint(colorOf(s.ti)) : null)), ...(glass && { glass }) });
   }
 
   // gameplay entities

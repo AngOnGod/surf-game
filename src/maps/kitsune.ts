@@ -11,7 +11,10 @@ import type { Vec } from '../physics';
 // secret room's button are left out.)
 // Most exits and gaps need a launch: climb the face and pop off its top (the autopilot plans these by look-ahead).
 // The autopilot line is verified per stage in test/ (some stages at 128 tick only); White's line is mapped only
-// through its first ridges: past them the route weaves under stacked kill shelves and isn't worked out yet.
+// through its first ridges. White is the long one: after its first ramp it threads glass grid walls and floors (window
+// brushes: solid, drawn see-through), goes east through two grid windows, crosses the north of the map and drops in at
+// the east end of a tube that runs the whole map back west to the exit window (a flood fill through free space, with
+// every step swept, finds that way through without touching a kill volume; test/).
 const STAGES: { name: string; dest: string; dir: Vec }[] = [ // dir: travel direction into the exit window
   { name: 'Red', dest: 'red', dir: [0, 1, 0] },
   { name: 'Orange', dest: 'orange', dir: [0, 1, 0] },

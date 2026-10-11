@@ -6,7 +6,7 @@ import { buildBrush } from '../src/game';
 // windowed top-down survey: first thing hit going down from ZT to ZB at each cell.
 // '.' ground, '/' surf ramp, 'T' fall teleport above it, '#' solid at ZT, ' ' nothing. Second block: hit heights.
 it('survey', () => {
-  const b = readFileSync('public/bsp/surf_aircontrol_ksf.bsp'), bsp = parseBsp(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), w = bsp.brushes.map(buildBrush);
+  const b = readFileSync(process.env.BSP ?? 'public/bsp/surf_aircontrol_ksf.bsp'), bsp = parseBsp(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), w = bsp.brushes.map(buildBrush);
   const [X0, X1, DX] = process.env.X!.split(',').map(Number), [Y0, Y1, DY] = process.env.Y!.split(',').map(Number), [ZT, ZB] = process.env.Z!.split(',').map(Number);
   const o: [number, number, number] = [0, 0, 0];
   const inShape = (f: (typeof bsp.fails)[number], p: number[]) => p.every((v, k) => v >= f.min[k] && v <= f.max[k]) && (!f.shape || f.shape.some(br => br.every(([nx, ny, nz, d]) => nx * p[0] + ny * p[1] + nz * p[2] <= d)));

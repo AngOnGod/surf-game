@@ -18,7 +18,7 @@ export const norm = (a: Vec): Vec => { const l = len(a); return l > 0 ? scale(a,
 
 export interface Plane { n: Vec; d: number } // solid where n·x <= d
 export interface Face { n: Vec; verts: Vec[]; color: number | null } // null: not drawn
-export interface Brush { planes: Plane[]; faces: Face[]; min: Vec; max: Vec; color: number; stamp?: number }
+export interface Brush { planes: Plane[]; faces: Face[]; min: Vec; max: Vec; color: number; stamp?: number; glass?: boolean }
 
 const AXES: Vec[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
 const ON = 1e-3;
