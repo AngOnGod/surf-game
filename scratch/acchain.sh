@@ -1,6 +1,6 @@
 #!/bin/zsh
 # robust per-section searches at 128 tick (6 variants each), baking each section's result before the next
-cd /Users/angusmacqueen/surf-game
+cd "$(dirname "$0")/.."
 export PATH=$HOME/.local/node/bin:$PATH
 for k in ${=SECTIONS:-1 2 3 4 5}; do
   rm -f scratch/acopt-$k.json scratch/acopt-$k.prog.dbg
