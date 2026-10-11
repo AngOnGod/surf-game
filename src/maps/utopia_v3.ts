@@ -19,11 +19,7 @@ const arc = (c: [number, number], r: number, a0: number, a1: number, z0: number,
 };
 /** Autopilot line (+y side): stations of guide points, each with a riding height ramping h0 -> h1 (0 = a face's
  *  bottom edge, 1 = its top; -1 = keep the point as an in-air waypoint). Heights tuned by search so the line holds
- *  from either tick parity (see test/). It is verified up to the booster. Past it the stations follow the line the map
- *  needs (flown over the kicker from the booster ridge's crest, out through the low opening in the corridor's north
- *  wall, round the glass bowl, into the east room and back west down the lower ridge, through the tunnel and the long
- *  hall to the END room): it is tight (the opening caps your speed, the turn in the east room needs it), and no run
- *  through it is verified yet. */
+ *  from either tick parity (see test/). Tuned up to the booster; past it the stations are the player's own line. */
 export const STATIONS: { g: Vec[]; h: [number, number]; aim?: number; dive?: number[] }[] = [
   { g: [[-13700, 200, 13060]], h: [-1, -1] }, // strafe off the spawn's centre line: dropping straight down lands on the ridge's flat top
   { g: line([-13350, 220, 11780], [-12033, 190, 10591], [-10767, 170, 9993], [-9450, 150, 9750]), h: [0.62, 0.8] },
@@ -45,19 +41,19 @@ export const STATIONS: { g: Vec[]; h: [number, number]; aim?: number; dive?: num
   { g: line([-9826, 7500, 212], [-9826, 5700, -373]), h: [0.6030648854864809, 0.62] },
   { g: arc([-7603, 2918], 2850, 180, 270, -710, -665), h: [0.62, 0.62] },
   { g: line([-2200, 190, -2043], [-100, 190, -2361], [1500, 250, -2250]), h: [0.62, 0.55] }, // booster
-  { g: line([2000, 150, -2000], [2700, 50, -1700]), h: [0.8, 0.95] }, // high to the ridge's crest at its end
-  // the kicker (it faces back west: hit head-on it throws you into the roof) is flown over from the crest, on a line
-  // that drops through the low opening in the corridor's north wall: the only way on, and it caps the speed you keep
-  { g: [[4608, 1141, -1150]], h: [-1, -1], aim: 0 }, // over the kicker's top edge
-  { g: [[5450, 1730, -1470]], h: [-1, -1], dive: [0] }, // through the opening
-  { g: line([6000, 3100, -2000], [7000, 3800, -2000], [8000, 4100, -2000], [8600, 4250, -2000]), h: [0.85, 0.85] }, // high round the glass bowl (an invisible clip ramp)
-  { g: [[10300, 4700, -2000], [11500, 5300, -2200]], h: [-1, -1] }, // over the jail top's kill floor, round its glass wall into the east room
-  { g: [[12800, 5600, -2500], [13600, 4200, -2700], [13500, 2000, -2950], [12800, 400, -3200]], h: [-1, -1] }, // the turn back: round the room to its middle
-  { g: line([12000, 0, -3750], [11000, 0, -3950], [10000, 0, -4150], [9300, 0, -4350]), h: [0.6, 0.6] }, // down the lower ridge, west, under the jail top
-  { g: [[8200, 0, -4450], [7000, 0, -4500]], h: [-1, -1] }, // over the kill box at its foot, into the tunnel under the corridor
-  { g: [[5500, 0, -4900], [3000, 0, -6000], [0, 0, -6800], [-1500, 0, -7300]], h: [-1, -1] }, // the long hall (its floor kills)
-  { g: line([-2500, 0, -7600], [-5000, 0, -7600], [-7200, 0, -7500]), h: [0.7, 0.7] }, // the low ridge into the END room
-  { g: [[-9000, 0, -7700]], h: [-1, -1] },
+  // past it: the line of the player's recorded run (test/runs/utopia_v3@128.json, keys from scratch/demoguide.test.ts),
+  // every key an exact point: off the booster ridge's upturned end, a 270° air loop over the corridor (open air up to
+  // z 560 there) onto the bowl's east face heading south, round the bowl, a launch east and a 180° air turn onto the
+  // lower ridge's south face, west down it, over the hall onto the low ridge and into the END room
+  { g: line([1615, 337, -2458], [2407, 311, -2223], [3176, 246, -1761]), h: [-1, -1] }, // ride 47.8-48.3 s
+  { g: line([3196, 244, -1746], [3626, 139, -1427], [4003, -53, -1145], [4923, -710, -498], [5514, -1058, -180], [6196, -1307, 96], [6880, -1360, 298], [7517, -1276, 436], [8162, -869, 536], [8393, -218, 565], [8380, 355, 544], [8280, 634, 517], [8059, 913, 471], [7347, 1563, 263], [6886, 1680, 112], [6214, 1620, -160], [5871, 1467, -338], [5399, 1128, -652], [4924, 682, -1064], [4728, 83, -1521], [4798, -508, -2002]), h: [-1, -1] }, // fly 48.3-53.2 s
+  { g: line([4804, -526, -2017], [5272, -1894, -2541]), h: [-1, -1] }, // ride 53.2-53.7 s
+  { g: line([5282, -1914, -2547], [5649, -2493, -2724]), h: [-1, -1] }, // fly 53.7-54.0 s
+  { g: line([5664, -2510, -2729], [6364, -3121, -2871], [7015, -3425, -2871], [7783, -3576, -2759], [8712, -3937, -2308]), h: [-1, -1] }, // ride 54.0-55.2 s
+  { g: line([8728, -3945, -2298], [10107, -4612, -1643], [11047, -4840, -1416], [11381, -4788, -1426], [11637, -4630, -1450], [12370, -3770, -1668], [12526, -3399, -1794], [12598, -2878, -1999], [12647, -1790, -2560], [12582, -1305, -2876], [12430, -971, -3137], [12145, -667, -3462], [11830, -485, -3770], [11365, -348, -4213]), h: [-1, -1] }, // fly 55.2-58.9 s
+  { g: line([11346, -352, -4224], [11122, -406, -4348], [10567, -420, -4500], [6632, -432, -5434], [6064, -452, -5503], [5079, -444, -5493]), h: [-1, -1] }, // ride 59.0-61.2 s
+  { g: line([5056, -443, -5492], [3281, -253, -5594], [1453, -157, -6006], [-374, -31, -6732], [-2148, 168, -7739]), h: [-1, -1] }, // fly 61.3-63.7 s
+  { g: line([-2171, 175, -7751], [-3235, 320, -7931], [-4741, 376, -8002], [-6124, 340, -7956], [-7415, 326, -7724], [-8600, 320, -7700]), h: [-1, -1] }, // ride 63.7-65.4 s
 ];
 export const routeOf = (st: typeof STATIONS) => st.flatMap(({ g, h }) => g.map((p, i) => [...p, h[0] + ((h[1] - h[0]) * i) / Math.max(1, g.length - 1)]));
 
