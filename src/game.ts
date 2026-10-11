@@ -3,7 +3,7 @@ import {
   type Brush, type Cmd, type Player, type Settings, type Vec, DEG, HULL_MIN, HULL_STAND, add, categorizePosition, ctx,
   hullMax, hullPlanes, makeBrush, newPlayer, playerMove, scale, teleport, trace,
 } from './physics';
-import type { Bsp, Filter, Shape } from './bsp';
+import type { Bsp, Filter, Shape, Terrain } from './bsp';
 import { cos, sin } from './fmath';
 
 export interface Spawn { pos: Vec; yaw: number; pitch?: number }
@@ -32,6 +32,7 @@ export interface MapDef {
   credit?: { by: string; source: string; license?: [string, string] }; // third-party maps: author, where it's from, licence name + link
   trail?: { zone: Box; width: [number, number]; life: number; height: number }; // a sprite trail handed out in zone (Source env_spritetrail parented to you)
   namers?: (Box & { shape?: Shape; name: string; filter?: Filter })[]; // zones that set the player's targetname (for filtered triggers)
+  terrain?: Terrain; // an imported map's displacements (terrain, cave walls): drawn only
 }
 
 export const box = (pos: Vec, size: Vec, o: { yaw?: number; color?: number } = {}): BrushDef => ({ type: 'box', pos, size, ...o });

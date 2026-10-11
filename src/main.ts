@@ -103,6 +103,14 @@ function buildScene(s: Session) {
   const eg = new THREE.BufferGeometry();
   eg.setAttribute('position', new THREE.Float32BufferAttribute(edges, 3));
   worldGroup.add(new THREE.LineSegments(eg, edgeMat));
+  const t = s.def.terrain;
+  if (t?.pos.length) {
+    const tg = new THREE.BufferGeometry();
+    tg.setAttribute('position', new THREE.BufferAttribute(t.pos, 3));
+    tg.setAttribute('normal', new THREE.BufferAttribute(t.nrm, 3));
+    tg.setAttribute('tint', new THREE.BufferAttribute(t.col, 3));
+    worldGroup.add(new THREE.Mesh(tg, brushMat));
+  }
   const d = s.def;
   if (!d.stages) { if (s.start) worldGroup.add(zoneMesh(s.start, 0x22c55e, 0.12)); if (s.end) worldGroup.add(zoneMesh(s.end, 0xef4444, 0.12)); }
   for (const st of d.stages ?? []) worldGroup.add(zoneMesh(st.start, 0x22c55e, 0.12), zoneMesh(st.end, 0xef4444, 0.12));

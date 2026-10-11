@@ -7,8 +7,10 @@ import type { Vec } from '../physics';
 // a kill pit, then the bottom run north to the blast door. The map is mirror-symmetric (x -> -x), so there are two
 // routes (east and west) and the checkpoints cover both. Falls teleport back to the spawn room, as on a server.
 // The map has no timer volumes: the start is the spawn platform, the end the blast door's trigger, the checkpoints are
-// placed by hand at the section changes. Left out: the moving crystals (func_tanktrain) and the secret (it is opened
-// with buttons: the secret door is left open, the island teleport stays off).
+// placed by hand at the section changes. The cave rock around the route is the map's own displacements, drawn but not
+// solid (the ramps inside are brushes; the verified line never touches the rock). Left out: static props (loose rocks,
+// stalactites), the moving crystals (func_tanktrain) and the secret (it is opened with buttons: the secret door is
+// left open, the island teleport stays off).
 const both = (min: Vec, max: Vec): Box[] => [{ min, max }, { min: [-max[0], min[1], min[2]], max: [-min[0], max[1], max[2]] }];
 const cp = (name: string, [a, ...also]: Box[]) => ({ name, ...a, also }); // centre ones need no mirror
 // The autopilot line is verified through checkpoint 2 (both tick parities, nudged starts; test/). Past it, the east

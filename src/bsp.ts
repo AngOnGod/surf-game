@@ -23,7 +23,10 @@ export interface Bsp {
   pushes: (Box & { vel: Vec; once: boolean; shape?: Shape })[];
   triggers: (Box & { e: Entity })[]; // trigger_multiple / trigger_once volumes (maps wire their outputs by hand)
   bounds: Box;
+  terrain: Terrain;
 }
+/** Displacements (terrain, cave walls) as a triangle soup: positions, normals, colours. Drawn only: not solid here. */
+export interface Terrain { pos: Float32Array; nrm: Float32Array; col: Float32Array }
 
 const vec = (s = '0 0 0') => s.trim().split(/\s+/).map(Number) as Vec;
 
@@ -142,8 +145,37 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
       pushes.push({ ...box, vel: [cos(p * DEG) * cos(y * DEG) * s, cos(p * DEG) * sin(y * DEG) * s, -sin(p * DEG) * s], once: !!(+(e.spawnflags ?? 0) & 0x80) });
     }
   }
+  // displacements: each a face (4 corners) subdivided 2^power times, every grid point pushed out along its own vector
+  const V = lump(3), ED = lump(12), SE = lump(13), FA = lump(7), DI = lump(26), DV = lump(33), pos: number[] = [], nrm: number[] = [], col: number[] = [];
+  const vert = (i: number): Vec => [f32(V.ofs + i * 12), f32(V.ofs + i * 12 + 4), f32(V.ofs + i * 12 + 8)];
+  const lerp = (a: Vec, b: Vec, t: number): Vec => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  for (let fi = 0; fi < FA.len / 56; fi++) {
+    const o = FA.ofs + fi * 56, di = i16(o + 12), color = di >= 0 && i16(o + 8) === 4 ? colorOf(i16(o + 10)) : null;
+    if (color === null) continue;
+    const corners = [0, 1, 2, 3].map(k => { const se = i32(SE.ofs + (i32(o + 4) + k) * 4); return vert(u16(ED.ofs + Math.abs(se) * 4 + (se >= 0 ? 0 : 2))); });
+    const d = DI.ofs + di * 176, start: Vec = [f32(d), f32(d + 4), f32(d + 8)], first = i32(d + 12), n = (1 << i32(d + 20)) + 1;
+    const far = (c: Vec) => Math.hypot(c[0] - start[0], c[1] - start[1], c[2] - start[2]), s0 = corners.reduce((m, c, k) => (far(c) < far(corners[m]) ? k : m), 0);
+    const [c0, c1, c2, c3] = [0, 1, 2, 3].map(k => corners[(s0 + k) % 4]), pts: Vec[] = [];
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const p = lerp(lerp(c0, c1, y / (n - 1)), lerp(c3, c2, y / (n - 1)), x / (n - 1)), v = DV.ofs + (first + y * n + x) * 20, dist = f32(v + 12);
+      pts.push([p[0] + f32(v) * dist, p[1] + f32(v + 4) * dist, p[2] + f32(v + 8) * dist]);
+    }
+    const [pn0, pn1, pn2] = planes[u16(o)], up = u8[o + 2] ? -1 : 1, rgb = [(color >> 16) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255];
+    const tri = (a: Vec, b: Vec, c: Vec) => {
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      let nn = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+      const l = Math.hypot(nn[0], nn[1], nn[2]) || 1, s = (nn[0] * pn0 + nn[1] * pn1 + nn[2] * pn2) * up < 0 ? -1 : 1; // face the way the base face does
+      nn = nn.map(x => (x / l) * s);
+      for (const q of [a, b, c]) { pos.push(...q); nrm.push(...nn); col.push(...rgb); }
+    };
+    for (let y = 0; y + 1 < n; y++) for (let x = 0; x + 1 < n; x++) {
+      const a = pts[y * n + x], b = pts[(y + 1) * n + x], c = pts[(y + 1) * n + x + 1], e = pts[y * n + x + 1];
+      tri(a, b, c); tri(a, c, e);
+    }
+  }
+  const terrain = { pos: new Float32Array(pos), nrm: new Float32Array(nrm), col: new Float32Array(col) };
   const w = models[0];
-  return { brushes, entities, fails, pushes, triggers, namers, spawn: spawnEnt ? spawnOf(spawnEnt) : { pos: [0, 0, 0], yaw: 0 }, bounds: { min: w.mins, max: w.maxs } };
+  return { brushes, entities, fails, pushes, triggers, namers, spawn: spawnEnt ? spawnOf(spawnEnt) : { pos: [0, 0, 0], yaw: 0 }, bounds: { min: w.mins, max: w.maxs }, terrain };
 }
 
 /** Load a map's .bsp (browser: fetch; tests pass their own reader) and merge it into the definition. */
@@ -151,7 +183,7 @@ export async function resolveMap(def: MapDef, read: (url: string) => Promise<Arr
   if (!r.ok) throw new Error(`${u} not found`);
   return r.arrayBuffer();
 })): Promise<MapDef> {
-  const full = def.bsp ? { ...def, ...def.bsp.apply(parseBsp(await read(def.bsp.url))) } : def;
+  const b = def.bsp && parseBsp(await read(def.bsp.url)), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain } : def;
   if (!full.routeOnSurface || !full.route) return full;
   const world = full.brushes.map(buildBrush);
   return { ...full, world, route: ridingLine(world, full.route) };
