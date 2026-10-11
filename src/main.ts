@@ -330,7 +330,7 @@ const NUMS: [keyof Settings, string, number][] = [
   ['maxspeed', 'Max speed', 1], ['maxvelocity', 'Max velocity (per axis)', 50], ['jumpImpulse', 'Jump impulse', 0.1],
   ['sensitivity', 'Mouse sensitivity (× 0.022°/count)', 0.05], ['fov', 'FOV (horizontal at 4:3)', 1],
 ];
-const BOOLS: [keyof Settings, string][] = [['bhopLimiter', 'Bunnyhop speed limiter (1.1 × max speed on jump)'], ['autobhop', 'Auto-bunnyhop (hold jump)'], ['trail', 'Rainbow trail (always on; some maps hand one out)']];
+const BOOLS: [keyof Settings, string][] = [['rampfix', 'Rampbug fix (no dead stops on ramps, as on surf servers)'], ['bhopLimiter', 'Bunnyhop speed limiter (1.1 × max speed on jump)'], ['autobhop', 'Auto-bunnyhop (hold jump)'], ['trail', 'Rainbow trail (always on; some maps hand one out)']];
 const CONTROLS = [['Click', 'capture mouse'], ['W A S D', 'move / strafe'], ['Mouse', 'look'], ['Space / wheel', 'jump'], ['Ctrl', 'duck'],
   ['R', 'restart run'], ['C / V', 'save / load practice checkpoint (invalidates timer)'], ['N', 'noclip (Space/Ctrl up/down, Shift fast)'],
   ['P', 'autopilot demo'], ['F3', 'debug overlay'], ['Esc', 'menu']];
@@ -353,7 +353,7 @@ function show(screen: Screen | null) {
   } else if (screen === 'pause') {
     panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-go="maps">Maps</button><button data-go="settings">Settings</button></div>`;
   } else {
-    panel.innerHTML = `<h1>SETTINGS</h1><h2>Movement</h2><div class="grid"><label>Tick rate</label><select data-k="tickrate"><option>128</option><option>64</option></select>` +
+    panel.innerHTML = `<h1>SETTINGS</h1><h2>Movement</h2><div class="grid"><label>Tick rate (autopilot made for 128)</label><select data-k="tickrate"><option>128</option><option>64</option><option>256</option></select>` +
       NUMS.map(([k, l, st]) => `<label>${l}</label><input type="number" step="${st}" data-k="${k}" value="${+(settings[k] as number).toFixed(4)}">`).join('') +
       BOOLS.map(([k, l]) => `<label>${l}</label><input type="checkbox" data-k="${k}" ${settings[k] ? 'checked' : ''}>`).join('') +
       `</div><div class="row"><button class="primary" data-go="${backTo}">Back</button><button data-act="defaults">Reset to defaults</button></div>`;

@@ -9,3 +9,4 @@ scratch/**/*.prog
 scratch/**/*.dbg
 scratch/*opt-*.json
 scratch/ac/
+scratch/rampbugs.json

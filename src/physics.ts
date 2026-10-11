@@ -163,13 +163,13 @@ const NON_JUMP_VELOCITY = 140, MAX_CLIP_PLANES = 5, MOVE_SPEED = 450, DUCK_SPEED
 export interface Settings {
   tickrate: number; gravity: number; airaccelerate: number; airMaxWishspeed: number; accelerate: number;
   friction: number; stopspeed: number; maxspeed: number; maxvelocity: number; jumpImpulse: number;
-  bhopLimiter: boolean; autobhop: boolean; sensitivity: number; fov: number;
+  bhopLimiter: boolean; autobhop: boolean; rampfix: boolean; sensitivity: number; fov: number;
   trail: boolean; // cosmetic: always show the rainbow trail (otherwise only where a map hands one out)
 }
 export const DEFAULTS: Settings = {
   tickrate: 128, gravity: 800, airaccelerate: 150, airMaxWishspeed: 30, accelerate: 5.5, friction: 5.2,
   stopspeed: 80, maxspeed: 250, maxvelocity: 3500, jumpImpulse: Math.sqrt(2 * 800 * 57),
-  bhopLimiter: false, autobhop: true, sensitivity: 2, fov: 90, trail: false, // surf-server cvars: sv_enablebunnyhopping 1, sv_autobunnyhopping 1
+  bhopLimiter: false, autobhop: true, rampfix: true, sensitivity: 2, fov: 90, trail: false, // surf-server setup: sv_enablebunnyhopping 1, sv_autobunnyhopping 1, a rampbug fix
 };
 
 /** fwd/side/up are key axes in [-1, 1]; the move code scales them like cl_forwardspeed. */
@@ -246,6 +246,19 @@ function startGravity(c: Ctx) { // vertical base velocity is folded in as an acc
 const withBase = (c: Ctx, move: () => void) => { c.p.vel = add(c.p.vel, c.p.baseVel); move(); c.p.vel = sub(c.p.vel, c.p.baseVel); };
 const zeroZ = (v: Vec): Vec => [v[0], v[1], 0];
 
+/** Rampbug fix (what surf servers patch in). Float rounding leaves a box a hair inside the surface it slides along:
+ *  either a swept move gets through but its end, re-tested, is stuck, or the next move starts all-solid; Source stops
+ *  the player dead either way. Instead, nudge the box back out along that surface (then straight up): a free spot
+ *  within 2 units keeps the move and the speed. */
+function unstick(c: Ctx, pos: Vec): Vec | null {
+  const n = c.p.lastNormal;
+  for (const d of (len(n) > 0 ? [n, [0, 0, 1]] : [[0, 0, 1]]) as Vec[]) for (const k of [DIST_EPSILON, 0.125, 0.5, 2]) {
+    const q = ma(pos, k, d);
+    if (!traceP(c, q, q).startsolid) return q;
+  }
+  return null;
+}
+
 export function tryPlayerMove(c: Ctx) {
   const p = c.p;
   const planes: Vec[] = [];
@@ -254,11 +267,16 @@ export function tryPlayerMove(c: Ctx) {
     if (len(p.vel) === 0) break;
     const tr = traceP(c, p.origin, ma(p.origin, timeLeft, p.vel));
     allFraction += tr.fraction;
-    if (tr.allsolid) { p.vel = [0, 0, 0]; return; } // trapped in a solid
+    if (tr.allsolid) { // trapped in a solid: with the fix, a hair inside the surface just hit gets nudged back out
+      const q = c.s.rampfix ? unstick(c, p.origin) : null;
+      if (!q) { p.vel = [0, 0, 0]; return; }
+      p.origin = q; continue;
+    }
     if (tr.fraction > 0) {
       if (tr.fraction === 1) {
-        const stuck = traceP(c, tr.end, tr.end);
-        if (stuck.startsolid || stuck.fraction !== 1) { p.vel = [0, 0, 0]; break; }
+        const stuck = traceP(c, tr.end, tr.end), q = (stuck.startsolid || stuck.fraction !== 1) && (c.s.rampfix ? unstick(c, tr.end) : null);
+        if (q === null) { p.vel = [0, 0, 0]; break; } // stuck at the end: Source stops dead (the classic rampbug)
+        if (q) tr.end = q;
       }
       p.origin = tr.end;
       original = p.vel;

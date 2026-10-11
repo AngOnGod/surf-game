@@ -125,6 +125,19 @@ describe('ground movement', () => {
     for (let i = 0; i < 600; i++) { p.yaw = Math.atan2(p.vel[1], p.vel[0]) * 180 / Math.PI; run(p, { ...NO_CMD, side: 1, jump: true }, 1); } // look along the velocity, hold D
     expect(hlen(p.vel)).toBeGreaterThan(500);
   });
+  it('256 tick: jumps still reach ~57 units and holding jump keeps the landing speed', () => {
+    const s256 = { ...S, tickrate: 256 }, { p } = settle([-1400, 1200, 50]);
+    run(p, NO_CMD, 8, world, s256);
+    const z0 = p.origin[2];
+    let apex = z0;
+    run(p, { ...NO_CMD, jump: true }, 1, world, s256);
+    for (let i = 0; i < 256; i++) { run(p, NO_CMD, 1, world, s256); apex = Math.max(apex, p.origin[2]); }
+    expect(apex - z0).toBeGreaterThan(56); // a little higher than at 128 (55.8): gravity is stepped more finely
+    expect(apex - z0).toBeLessThan(57);
+    p.vel = [-400, 0, 0];
+    for (let i = 0; i < 800; i++) run(p, { ...NO_CMD, jump: true }, 1, world, s256);
+    expect(hlen(p.vel)).toBeCloseTo(400, 6);
+  });
   it('walks up the 45° wedge at full horizontal speed (StepMove)', () => {
     const { p } = settle([-760, 0, 50]);
     run(p, { ...NO_CMD, fwd: 1 }, 90); // ~69 ticks to reach 250 against friction
@@ -177,6 +190,27 @@ describe('surf scenario on the 60° ramp', () => {
     expect(l.p[0] + 16).toBeGreaterThan(RAMP60.x1 - 1); // box reached the end cap
     expect(log.at(-1)!.p[0] - 16).toBeGreaterThan(RAMP60.x1); // and flew past it
     expect(l.p[1] + 16).toBeLessThan(RAMP60.y + RAMP60.width / 2); // still on the face, not off the bottom
+  });
+});
+
+describe('rampbug fix', () => {
+  // states from random rides on the Gauntlet's ramps where Source's float rounding stops the player dead
+  const CASES = [
+    { origin: [16786.131524297016, 34544.40507052369, 8087.242067651104], vel: [201.93756529284215, 698.6875908730934, 120.10863574333283], lastNormal: [0.6756429699644945, -0.31849562586173336, 0.6648812777064039] },
+    { origin: [9500.652862802182, 32771.3758796263, 8680.532111993316], vel: [364.0458153949477, -420.0912335620069, -169.3680179765889], lastNormal: [0.6708810157520627, 0.3280965896019037, 0.6650348040479389] },
+  ];
+  it('Source stops dead on these; with the fix the player keeps its speed, in free space', () => {
+    const def = mapDefs.find(m => m.id === 'gauntlet')!;
+    for (const k of CASES) for (const rampfix of [false, true]) {
+      const s = new Session(def, { ...S, rampfix });
+      Object.assign(s.p, { origin: [...k.origin], vel: [...k.vel], lastNormal: [...k.lastNormal], onGround: false, tick: 1, touchTick: 0 });
+      s.step(NO_CMD);
+      if (!rampfix) expect(len(s.p.vel)).toBeLessThan(20);
+      else {
+        expect(len(s.p.vel)).toBeGreaterThan(0.8 * len(k.vel as Vec));
+        expect(trace(s.world, s.p.origin, s.p.origin, HULL_MIN, HULL_STAND).startsolid).toBe(false);
+      }
+    }
   });
 });
 
