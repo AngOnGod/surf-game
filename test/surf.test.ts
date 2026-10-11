@@ -7,7 +7,7 @@ import {
 import { type MapDef, type Spawn, Session, buildBrush } from '../src/game';
 import { makeBot } from '../src/bot';
 import { type Demo, replay, replayDemo } from '../src/plan';
-import { DEMOS, RUNS } from '../src/runs';
+import { RUNS } from '../src/runs';
 import * as F from '../src/fmath';
 import { parseBsp, resolveMap } from '../src/bsp';
 import testMap, { RAMP60 } from '../src/maps/test';
@@ -519,14 +519,15 @@ describe('planned autopilot runs', () => {
   }
 });
 
-// recorded runs replay exactly: from their snapshot, the stored view and keys finish in the stored time, without a
-// fall (any change to the movement code that moves a human's line shows up here)
+// the player's recorded runs (test/runs/, saved in-game with E) replay exactly: from their snapshot, the stored view and
+// keys finish in the stored time, without a fall (any change to the movement code that moves a human's line shows up here)
+const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625 };
 describe('recorded runs', () => {
   for (const [key, time] of Object.entries(DEMOS)) {
     const [id, tick] = key.split('@'), m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
     it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the recorded run finishes in ${time.toFixed(3)}`, async () => {
       const def = await resolveMap(m, async () => { const b = readFileSync(file!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
-      const d: Demo = JSON.parse(readFileSync(`public/runs/${key}.json`, 'utf8')), s = new Session(def, { ...S, tickrate: +tick }), bot = replayDemo(d.ticks);
+      const d: Demo = JSON.parse(readFileSync(`test/runs/${key}.json`, 'utf8')), s = new Session(def, { ...S, tickrate: +tick }), bot = replayDemo(d.ticks);
       s.restore(d.snap);
       let t = -1;
       for (let i = 0; i < d.ticks.length && t < 0; i++) {

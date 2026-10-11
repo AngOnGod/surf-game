@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { type Cmd, type Player, type Settings, type Vec, DEFAULTS, NO_CMD, hlen, len, viewVectors } from './physics';
 import { type Box, type GameEvent, type MapDef, Session } from './game';
 import { makeBot } from './bot';
-import { type Demo, replay, replayDemo } from './plan';
-import { DEMOS, RUNS } from './runs';
+import { type Demo, replay } from './plan';
+import { RUNS } from './runs';
 import { resolveMap } from './bsp';
 
 const MAPS = Object.values(import.meta.glob<{ default: MapDef }>('./maps/*.ts', { eager: true }))
@@ -275,17 +275,15 @@ function readCmd(): Cmd {
   return { fwd: k('KeyW') - k('KeyS'), side: k('KeyD') - k('KeyA'), up: k('Space') - (duck ? 1 : 0), jump, duck, fast: !!(k('ShiftLeft') || k('ShiftRight')) };
 }
 
-async function startAutopilot() { // a planned or recorded run if there is one for this map and tick rate (standard settings only), else the route follower
-  const key = `${session.def.id}@${settings.tickrate}`, planned = custom() ? undefined : RUNS[key], recorded = custom() ? undefined : DEMOS[key], r = session.def.route;
-  if (!planned && !recorded && !r) return flash('This map has no autopilot route');
+function startAutopilot() { // a planned run if there is one for this map and tick rate (standard settings only), else the route follower
+  const planned = custom() ? undefined : RUNS[`${session.def.id}@${settings.tickrate}`], r = session.def.route;
+  if (!planned && !r) return flash('This map has no autopilot route');
   session.restart();
   session.assisted = true;
   rec = null;
   const routeBot = (settle: boolean) => makeBot(r ?? [], session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle });
-  if (planned) autopilot = replay(planned.run, settings.tickrate, routeBot(false)); // (planned runs hand some blocks to it)
-  else if (recorded) { const d: Demo = await fetch(`runs/${key}.json`).then(r => r.json()); session.restore(d.snap); session.invalidate(); autopilot = replayDemo(d.ticks); } // (the snapshot's timer is already running: flag it)
-  else autopilot = routeBot(true);
-  flash(planned ? `Autopilot: its planned run, ${fmt(planned.time)} (P to stop)` : recorded ? `Autopilot: a recorded run, ${fmt(recorded)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
+  autopilot = planned ? replay(planned.run, settings.tickrate, routeBot(false)) : routeBot(true); // (planned runs hand some blocks to it)
+  flash(planned ? `Autopilot: its planned run, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }
 
