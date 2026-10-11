@@ -1,0 +1,11 @@
+node_modules
+dist
+# maps with no licence to share them: personal use only, never committed or shipped
+public/bsp/
+# scratch tool output
+scratch/**/*.out
+scratch/**/*.log
+scratch/**/*.prog
+scratch/**/*.dbg
+scratch/*opt-*.json
+scratch/ac/
