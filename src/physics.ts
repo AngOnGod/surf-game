@@ -1,6 +1,6 @@
 // Port of Source (CS:S / CS:GO) CGameMovement. World units are Source units, Z is up.
 // Collision: convex brushes traced as an expanded point (Q3 / Source CM_ClipBoxToBrush style).
-import { atan2, cos, sin } from './fmath';
+import { atan2, cos, sin, hypot2, hypot3 } from './fmath';
 
 export type Vec = [number, number, number];
 export const DEG = Math.PI / 180;
@@ -10,8 +10,8 @@ export const scale = (a: Vec, s: number): Vec => [a[0] * s, a[1] * s, a[2] * s];
 export const ma = (a: Vec, s: number, b: Vec): Vec => [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2]];
 export const dot = (a: Vec, b: Vec) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 export const cross = (a: Vec, b: Vec): Vec => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-export const len = (a: Vec) => Math.hypot(a[0], a[1], a[2]);
-export const hlen = (a: Vec) => Math.hypot(a[0], a[1]);
+export const len = (a: Vec) => hypot3(a[0], a[1], a[2]);
+export const hlen = (a: Vec) => hypot2(a[0], a[1]);
 export const norm = (a: Vec): Vec => { const l = len(a); return l > 0 ? scale(a, 1 / l) : [0, 0, 0]; };
 
 // ---------------------------------------------------------------- brushes
@@ -427,7 +427,7 @@ export function playerMove(c: Ctx, cmd: Cmd) {
   if (p.noclip) return noclipMove(c, cmd);
   // CheckParameters: cl_forwardspeed / cl_sidespeed 450, scaled down to maxspeed
   let fmove = cmd.fwd * MOVE_SPEED, smove = cmd.side * MOVE_SPEED;
-  const spd = Math.hypot(fmove, smove);
+  const spd = hypot2(fmove, smove);
   if (spd > s.maxspeed) { fmove *= s.maxspeed / spd; smove *= s.maxspeed / spd; }
   if (p.vel[2] > 250) setGround(c, null); // sv_optimizedmovement: ground carries over from last tick
   duck(c, cmd);

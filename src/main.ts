@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { type Cmd, type Player, type Settings, type Vec, DEFAULTS, NO_CMD, hlen, len, viewVectors } from './physics';
 import { type Box, type GameEvent, type MapDef, Session } from './game';
 import { makeBot } from './bot';
+import { replay } from './plan';
+import { RUNS } from './runs';
 import { resolveMap } from './bsp';
 
 const MAPS = Object.values(import.meta.glob<{ default: MapDef }>('./maps/*.ts', { eager: true }))
@@ -259,13 +261,14 @@ function readCmd(): Cmd {
   return { fwd: k('KeyW') - k('KeyS'), side: k('KeyD') - k('KeyA'), up: k('Space') - (duck ? 1 : 0), jump, duck, fast: !!(k('ShiftLeft') || k('ShiftRight')) };
 }
 
-function startAutopilot() {
-  const r = session.def.route;
-  if (!r) return flash('This map has no autopilot route');
+function startAutopilot() { // a planned run if there is one for this map and tick rate (standard settings only), else the route follower
+  const planned = custom() ? undefined : RUNS[`${session.def.id}@${settings.tickrate}`], r = session.def.route;
+  if (!planned && !r) return flash('This map has no autopilot route');
   session.restart();
   session.assisted = true;
-  autopilot = makeBot(r, session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle: true });
-  flash('Autopilot demo (P to stop) · runs are not saved');
+  const routeBot = (settle: boolean) => makeBot(r ?? [], session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle });
+  autopilot = planned ? replay(planned.run, settings.tickrate, routeBot(false)) : routeBot(true); // (planned runs hand some blocks to it)
+  flash(planned ? `Autopilot: its planned run, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }
 

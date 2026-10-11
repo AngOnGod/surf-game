@@ -19,9 +19,12 @@ const arc = (c: [number, number], r: number, a0: number, a1: number, z0: number,
 };
 /** Autopilot line (+y side): stations of guide points, each with a riding height ramping h0 -> h1 (0 = a face's
  *  bottom edge, 1 = its top; -1 = keep the point as an in-air waypoint). Heights tuned by search so the line holds
- *  from either tick parity (see test/). It is verified up to the booster: past it a glass bowl (see-through panels over an invisible
- *  clip ramp) turns the map back underneath, through a lower entrance into the long final descent to the END room, and that link isn't mapped yet. */
-export const STATIONS: { g: Vec[]; h: [number, number] }[] = [
+ *  from either tick parity (see test/). It is verified up to the booster. Past it the stations follow the line the map
+ *  needs (flown over the kicker from the booster ridge's crest, out through the low opening in the corridor's north
+ *  wall, round the glass bowl, into the east room and back west down the lower ridge, through the tunnel and the long
+ *  hall to the END room): it is tight (the opening caps your speed, the turn in the east room needs it), and no run
+ *  through it is verified yet. */
+export const STATIONS: { g: Vec[]; h: [number, number]; aim?: number; dive?: number[] }[] = [
   { g: [[-13700, 200, 13060]], h: [-1, -1] }, // strafe off the spawn's centre line: dropping straight down lands on the ridge's flat top
   { g: line([-13350, 220, 11780], [-12033, 190, 10591], [-10767, 170, 9993], [-9450, 150, 9750]), h: [0.62, 0.8] },
   { g: line([-7100, 330, 9210], [-5800, 250, 9380], [-4500, 150, 9500]), h: [0.5, 0.78] },
@@ -41,9 +44,20 @@ export const STATIONS: { g: Vec[]; h: [number, number] }[] = [
   { g: arc([-12425, 12578], 2850, 180, 0, 690, 700), h: [0.6378838831069753, 0.6692735620934023] },
   { g: line([-9826, 7500, 212], [-9826, 5700, -373]), h: [0.6030648854864809, 0.62] },
   { g: arc([-7603, 2918], 2850, 180, 270, -710, -665), h: [0.62, 0.62] },
-  { g: line([-2200, 190, -2043], [-100, 190, -2361], [2000, 190, -2185], [2700, 190, -1954]), h: [0.62, 0.62] }, // booster
-  { g: line([-1100, 190, -7769], [-6900, 190, -7672]), h: [0.62, 0.62] },
-  { g: [[-11000, 0, -8000]], h: [-1, -1] },
+  { g: line([-2200, 190, -2043], [-100, 190, -2361], [1500, 250, -2250]), h: [0.62, 0.55] }, // booster
+  { g: line([2000, 150, -2000], [2700, 50, -1700]), h: [0.8, 0.95] }, // high to the ridge's crest at its end
+  // the kicker (it faces back west: hit head-on it throws you into the roof) is flown over from the crest, on a line
+  // that drops through the low opening in the corridor's north wall: the only way on, and it caps the speed you keep
+  { g: [[4608, 1141, -1150]], h: [-1, -1], aim: 0 }, // over the kicker's top edge
+  { g: [[5450, 1730, -1470]], h: [-1, -1], dive: [0] }, // through the opening
+  { g: line([6000, 3100, -2000], [7000, 3800, -2000], [8000, 4100, -2000], [8600, 4250, -2000]), h: [0.85, 0.85] }, // high round the glass bowl (an invisible clip ramp)
+  { g: [[10300, 4700, -2000], [11500, 5300, -2200]], h: [-1, -1] }, // over the jail top's kill floor, round its glass wall into the east room
+  { g: [[12800, 5600, -2500], [13600, 4200, -2700], [13500, 2000, -2950], [12800, 400, -3200]], h: [-1, -1] }, // the turn back: round the room to its middle
+  { g: line([12000, 0, -3750], [11000, 0, -3950], [10000, 0, -4150], [9300, 0, -4350]), h: [0.6, 0.6] }, // down the lower ridge, west, under the jail top
+  { g: [[8200, 0, -4450], [7000, 0, -4500]], h: [-1, -1] }, // over the kill box at its foot, into the tunnel under the corridor
+  { g: [[5500, 0, -4900], [3000, 0, -6000], [0, 0, -6800], [-1500, 0, -7300]], h: [-1, -1] }, // the long hall (its floor kills)
+  { g: line([-2500, 0, -7600], [-5000, 0, -7600], [-7200, 0, -7500]), h: [0.7, 0.7] }, // the low ridge into the END room
+  { g: [[-9000, 0, -7700]], h: [-1, -1] },
 ];
 export const routeOf = (st: typeof STATIONS) => st.flatMap(({ g, h }) => g.map((p, i) => [...p, h[0] + ((h[1] - h[0]) * i) / Math.max(1, g.length - 1)]));
 
@@ -63,6 +77,7 @@ const map: MapDef = {
     cp('The Loop', both([-15400, 3600, 1800], [-13900, 4600, 3400])),
   ],
   route: routeOf(STATIONS) as [number, number, number, number][],
+  routeFlags: STATIONS.flatMap(({ g, aim, dive = [] }) => g.map((_, i) => (i === aim ? 1 : 0) | (dive.includes(i) ? 2 : 0))),
   routeOnSurface: true,
   bsp: {
     url: 'maps/surf_utopia_v3.bsp',

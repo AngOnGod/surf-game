@@ -101,3 +101,25 @@ export function atan2(y: number, x: number) {
   const z = k > 60 ? PIO2_HI + 0.5 * PI_LO : x < 0 && k < -60 ? 0 : atan(Math.abs(y / x));
   return m === 0 ? z : m === 1 ? -z : m === 2 ? PI - (z - PI_LO) : (z - PI_LO) - PI;
 }
+
+// Math.hypot as V8 computes it (scale by the largest, Kahan-sum the squares, sqrt): engines may round hypot differently,
+// so this gives Chrome's (and node's) results in every browser. 2- and 3-argument forms, for speed.
+export function hypot2(x: number, y: number) {
+  const a = Math.abs(x), b = Math.abs(y);
+  if (a === Infinity || b === Infinity) return Infinity;
+  if (a !== a || b !== b) return NaN;
+  const m = a > b ? a : b;
+  if (m === 0) return 0;
+  const p = a / m, q = b / m, s0 = p * p, s1 = q * q - ((s0 - 0) - s0);
+  return Math.sqrt(s0 + s1) * m;
+}
+export function hypot3(x: number, y: number, z: number) {
+  const a = Math.abs(x), b = Math.abs(y), c = Math.abs(z);
+  if (a === Infinity || b === Infinity || c === Infinity) return Infinity;
+  if (a !== a || b !== b || c !== c) return NaN;
+  const m = Math.max(a, b, c);
+  if (m === 0) return 0;
+  let sum = 0, comp = 0;
+  for (const v of [a / m, b / m, c / m]) { const t = v * v - comp, pre = sum + t; comp = (pre - sum) - t; sum = pre; }
+  return Math.sqrt(sum) * m;
+}

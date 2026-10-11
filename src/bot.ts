@@ -52,7 +52,7 @@ export function makeBot(route: readonly number[][], world: Brush[], s: Settings,
     const la = Math.hypot(ax, ay), ld = Math.hypot(dx, dy);
     return la > 400 && ld > 400 && ld < 15000 && ax * dx + ay * dy < -0.17 * la * ld;
   };
-  return (p: Player): Cmd => {
+  const bot = (p: Player): Cmd => {
     const o = p.origin, v = p.vel;
     if (!last || Math.hypot(o[0] - last[0], o[1] - last[1], o[2] - last[2]) > 200) { // start or teleport: resume at the nearest waypoint
       let best = 0;
@@ -184,4 +184,10 @@ export function makeBot(route: readonly number[][], world: Brush[], s: Settings,
     else if (lateral && need > 30) p.yaw -= side * asin(Math.min(15, need - 30) / speed) / DEG; // up to 45 a tick: nearly free
     return { ...NO_CMD, side };
   };
+  // its state, to search from (a planned run can hand blocks to it: src/plan.ts)
+  type State = { plan: typeof plan; k: number; last: Vec | null; settling: boolean; tk: number; tn: Vec | null };
+  return Object.assign(bot, {
+    save: (): State => ({ plan: { ...plan }, k, last: last && [...last] as Vec, settling, tk, tn: tn && [...tn] as Vec }),
+    load: (st: State) => { Object.assign(plan, st.plan); ({ k, settling, tk } = st); last = st.last && [...st.last] as Vec; tn = st.tn && [...st.tn] as Vec; },
+  });
 }

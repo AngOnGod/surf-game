@@ -6,6 +6,8 @@ import {
 } from '../src/physics';
 import { type MapDef, type Spawn, Session, buildBrush } from '../src/game';
 import { makeBot } from '../src/bot';
+import { replay } from '../src/plan';
+import { RUNS } from '../src/runs';
 import * as F from '../src/fmath';
 import { parseBsp, resolveMap } from '../src/bsp';
 import testMap, { RAMP60 } from '../src/maps/test';
@@ -498,4 +500,21 @@ describe.skipIf(!existsSync(MESA))('Source .bsp import (surf_mesa)', () => {
       expect(res, `parity ${par}`).toBe('ok');
     }
   }, 120_000);
+});
+
+// planned runs replay exactly: from a fresh start, the stored moves finish in the stored time, without a fall
+describe('planned autopilot runs', () => {
+  for (const [key, { run, time }] of Object.entries(RUNS)) {
+    const [id, tick] = key.split('@'), m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
+    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the planned run finishes in ${time.toFixed(3)}`, async () => {
+      const def = await resolveMap(m, async () => { const b = readFileSync(file!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
+      const s = new Session(def, { ...S, tickrate: +tick }), bot = replay(run, +tick, makeBot(def.route ?? [], s.world, s.s, undefined, !!def.routeOnSurface, { flags: def.routeFlags, hazard: s.hazard, bisect: def.routeCorners }));
+      let t = -1;
+      for (let i = 0; i < +tick * (time + 5) && t < 0; i++) {
+        s.step(bot(s.p));
+        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if (e.type === 'finish') t = e.time; }
+      }
+      expect(t).toBe(time);
+    }, 120_000);
+  }
 });

@@ -1,11 +1,12 @@
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { HULL_MIN, HULL_STAND, trace } from '../src/physics';
+import { HULL_DUCK, HULL_MIN, HULL_STAND, trace } from '../src/physics';
 import { parseBsp } from '../src/bsp';
 import { buildBrush } from '../src/game';
 // 3D flood fill (BFS) of hull-free cells from START, never touching a teleport/kill trigger's exact shape; writes the
-// shortest cell path to the reachable cell nearest GOAL (OUT, JSON) and a summary
+// shortest cell path to the reachable cell nearest GOAL (OUT, JSON) and a summary. DUCK=1: a ducked player's hull
 it('flood', () => {
+  const HULL = process.env.DUCK ? HULL_DUCK : HULL_STAND, H = HULL[2];
   const b = readFileSync(process.env.BSP!), bsp = parseBsp(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), w = bsp.brushes.map(buildBrush);
   const [x0, y0, z0, x1, y1, z1] = process.env.BOX!.split(',').map(Number), C = +(process.env.CELL ?? 96), start = process.env.START!.split(',').map(Number), goal = process.env.GOAL!.split(',').map(Number);
   const nx = Math.ceil((x1 - x0) / C), ny = Math.ceil((y1 - y0) / C), nz = Math.ceil((z1 - z0) / C), N = nx * ny * nz;
@@ -14,10 +15,10 @@ it('flood', () => {
   const fails = bsp.fails;
   const free = (id: number) => {
     if (state[id]) return state[id] === 3 ? false : state[id] !== 2;
-    const p = P(id), corners = [0, 1, 2, 3, 4, 5, 6, 7].map(c => [p[0] + (c & 1 ? 16 : -16), p[1] + (c & 2 ? 16 : -16), p[2] + (c & 4 ? 72 : 0)]);
-    const touches = (f: (typeof fails)[number]) => p[0] + 16 > f.min[0] && p[0] - 16 < f.max[0] && p[1] + 16 > f.min[1] && p[1] - 16 < f.max[1] && p[2] + 72 > f.min[2] && p[2] < f.max[2]
+    const p = P(id), corners = [0, 1, 2, 3, 4, 5, 6, 7].map(c => [p[0] + (c & 1 ? 16 : -16), p[1] + (c & 2 ? 16 : -16), p[2] + (c & 4 ? H : 0)]);
+    const touches = (f: (typeof fails)[number]) => p[0] + 16 > f.min[0] && p[0] - 16 < f.max[0] && p[1] + 16 > f.min[1] && p[1] - 16 < f.max[1] && p[2] + H > f.min[2] && p[2] < f.max[2]
       && (!f.shape || f.shape.some(br => br.every(([a, bb, c, d]) => Math.min(...corners.map(q => a * q[0] + bb * q[1] + c * q[2])) <= d)));
-    const bad = trace(w, p, p, HULL_MIN, HULL_STAND).startsolid || fails.some(touches);
+    const bad = trace(w, p, p, HULL_MIN, HULL).startsolid || fails.some(touches);
     state[id] = bad ? 2 : 1; return !bad;
   };
   const cell = (p: number[]) => { const i = Math.round((p[0] - x0) / C), j = Math.round((p[1] - y0) / C), k = Math.round((p[2] - z0) / C); return (k * ny + j) * nx + i; };
@@ -32,7 +33,7 @@ it('flood', () => {
       if (a < 0 || bb < 0 || c < 0 || a >= nx || bb >= ny || c >= nz) continue;
       const n = (c * ny + bb) * nx + a;
       if (!free(n)) continue;
-      if (process.env.SWEEP) { const pa = P(id), pb = P(n), t = trace(w, pa, pb, HULL_MIN, HULL_STAND); if (t.fraction < 1 || t.startsolid) continue; } // a wall between the two cells
+      if (process.env.SWEEP) { const pa = P(id), pb = P(n), t = trace(w, pa, pb, HULL_MIN, HULL); if (t.fraction < 1 || t.startsolid) continue; } // a wall between the two cells
       state[n] = 3; parent[n] = id; queue[tail++] = n;
     }
   }

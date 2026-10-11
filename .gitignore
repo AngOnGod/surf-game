@@ -14,3 +14,9 @@ scratch/me/
 scratch/*-flood.json*
 scratch/*-poly.json
 scratch/flood.json*
+scratch/*.bin
+scratch/*.run.json
+scratch/*.snap.json
+scratch/u3-*.json
+scratch/u3-*.txt
+scratch/u3-*.json.txt
