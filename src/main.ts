@@ -16,7 +16,10 @@ const saved = store.get<Partial<Settings> & { v?: number }>('surf.settings', {})
 if (!saved.v) { delete saved.bhopLimiter; delete saved.autobhop; } // v1 saved vanilla CS:GO's bhop settings: switch to the surf-server ones
 const settings: Settings & { v: number } = { ...DEFAULTS, ...saved, v: 2 };
 interface PB { time?: number; splits?: (number | undefined)[]; stages?: (number | undefined)[] }
-const pbKey = (id: string) => `surf.pb.${id}`;
+const pbKey = (id: string, tick = settings.tickrate) => `surf.pb.${id}${tick === 128 ? '' : '@' + tick}`; // each tick rate has its own times
+// like a server's: times only count with the standard movement settings
+const MOVEMENT: (keyof Settings)[] = ['gravity', 'airaccelerate', 'airMaxWishspeed', 'accelerate', 'friction', 'stopspeed', 'maxspeed', 'maxvelocity', 'jumpImpulse', 'rampfix', 'bhopLimiter', 'autobhop'];
+const custom = () => MOVEMENT.some(k => Math.abs(+settings[k] - +DEFAULTS[k]) > 1e-6);
 const $ = (id: string) => document.getElementById(id)!;
 const wrap = (a: number) => ((a + 540) % 360) - 180;
 const fmt = (t: number) => { const m = Math.floor(t / 60); return `${m}:${(t - m * 60).toFixed(3).padStart(6, '0')}`; };
@@ -286,12 +289,12 @@ function onEvent(e: GameEvent) {
     const ref = pb.splits?.[e.index];
     flash(`${sectionName(e.index + 1) ?? `Split ${e.index + 1}`}  ${fmt(e.time)}${ref !== undefined ? '  ' + diff(e.time - ref) : ''}`);
   } else if (e.type === 'stage') {
-    if (e.practice) return flash(`Stage ${e.index + 1}  ${fmt(e.time)}  <span class="gold">practice</span>`);
+    if (e.practice || custom()) return flash(`Stage ${e.index + 1}  ${fmt(e.time)}  <span class="gold">${e.practice ? 'practice' : 'custom settings: not saved'}</span>`);
     const ref = pb.stages?.[e.index], best = ref === undefined || e.time < ref;
     if (best) { (pb.stages ??= [])[e.index] = e.time; store.set(pbKey(id), pb); }
     flash(`Stage ${e.index + 1}  ${fmt(e.time)}${ref !== undefined ? '  ' + diff(e.time - ref) : ''}${best ? '  <span class="gold">stage PB</span>' : ''}`, 3500);
   } else if (e.type === 'finish') {
-    if (e.practice) return flash(`Finished  ${fmt(e.time)}\n<span class="gold">practice: not saved</span>`, 5000);
+    if (e.practice || custom()) return flash(`Finished  ${fmt(e.time)}\n<span class="gold">${e.practice ? 'practice' : 'custom settings'}: not saved</span>`, 5000);
     const best = pb.time === undefined || e.time < pb.time;
     if (best) store.set(pbKey(id), { ...pb, time: e.time, splits: e.splits });
     flash(`${best ? '<span class="gold">NEW PERSONAL BEST</span>\n' : 'Finished\n'}${fmt(e.time)}${pb.time !== undefined ? '  ' + diff(e.time - pb.time) : ''}`, 6000);
@@ -307,7 +310,7 @@ function hud() {
   const p = session.p, r = session.run, st = session.stage, staged = !!session.def.stages, total = session.sections;
   set('speed', `${Math.round(hlen(p.vel))}<small>u/s</small>`);
   const tag = (t: string, c = 'gold') => `<span class="tag ${c}">${t}</span>`;
-  const practice = r.practice ? tag(session.assisted ? 'AUTOPILOT' : 'PRACTICE') : '';
+  const practice = r.practice ? tag(session.assisted ? 'AUTOPILOT' : 'PRACTICE') : custom() ? tag('CUSTOM') : '';
   let timer = r.state === 'ready' ? `<span class="good">${fmt(0)}</span>${tag('START', 'good')}` : r.state === 'running' ? fmt(r.time) + practice
     : r.state === 'done' ? `<span class="gold">${fmt(r.time)}</span>${practice}` : '';
   if (staged && st.state !== 'idle') timer += `<div style="font-size:15px;opacity:.75">stage ${st.index + 1}  ${fmt(st.time)}</div>`;
@@ -336,7 +339,61 @@ function hud() {
 
 // ---------------------------------------------------------------- menus
 
-type Screen = 'maps' | 'pause' | 'settings' | 'pick';
+type Screen = 'maps' | 'pause' | 'settings' | 'pick' | 'board';
+// ---------------------------------------------------------------- leaderboard: no server, so times travel in links
+
+type Times = Record<string, Record<string, { r?: number; s?: (number | null)[] }>>; // tick -> map id -> run / stage times
+const TICKS = [128, 64, 256];
+const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const myName = () => store.get('surf.name', '');
+const friends = () => store.get<Record<string, { at: number; d: Times }>>('surf.friends', {});
+const b64 = { // base64url of UTF-8 JSON
+  enc: (o: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+  dec: (s: string) => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)))),
+};
+function myTimes(): Times {
+  const d: Times = {};
+  for (const tick of TICKS) for (const m of MAPS) {
+    const pb: PB = store.get(pbKey(m.id, tick), {});
+    if (pb.time !== undefined || pb.stages?.some(t => t != null)) (d[tick] ??= {})[m.id] = { r: pb.time, s: pb.stages?.map(t => t ?? null) };
+  }
+  return d;
+}
+function addFriend(o: { n?: unknown; d?: Record<string, Record<string, { r?: unknown; s?: unknown }>> }) { // from a link: untrusted
+  const n = typeof o?.n === 'string' ? o.n.trim().slice(0, 24) : '', d: Times = {}, t = (x: unknown) => (typeof x === 'number' && x > 0 && x < 1e6 ? x : null);
+  if (!n) throw new Error('no name in it');
+  if (n === myName()) throw new Error('it has your own name (use different names)');
+  for (const tick of TICKS) for (const m of MAPS) {
+    const e = o.d?.[tick]?.[m.id];
+    if (e && typeof e === 'object') (d[tick] ??= {})[m.id] = { r: t(e.r) ?? undefined, s: Array.isArray(e.s) ? e.s.slice(0, 64).map(t) : undefined };
+  }
+  store.set('surf.friends', { ...friends(), [n]: { at: Date.now(), d } });
+  return n;
+}
+let boardNote = '';
+function openLink() {
+  const m = location.hash.match(/^#times=([\w-]+)$/);
+  if (!m) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  try { boardNote = `Added ${esc(addFriend(b64.dec(m[1])))}'s times.`; } catch (err) { boardNote = `That times link didn't load: ${esc((err as Error).message)}.`; }
+  show('board');
+}
+addEventListener('hashchange', openLink);
+function board() { // per map (and tick rate): a column per player, the best in each row in gold
+  const cols: [string, Times][] = [[myName() || 'You', myTimes()], ...Object.entries(friends()).sort(([a], [b]) => a.localeCompare(b)).map(([n, f]) => [n, f.d] as [string, Times])];
+  let html = '';
+  for (const tick of TICKS) for (const m of MAPS) {
+    const at = cols.map(([, d]) => d[tick]?.[m.id]), n = Math.max(0, ...at.map(e => e?.s?.length ?? 0));
+    const rows = [['Run', at.map(e => e?.r)] as const, ...Array.from({ length: n }, (_, i) => [m.stages?.[i]?.name ?? `Stage ${i + 1}`, at.map(e => e?.s?.[i] ?? undefined)] as const)]
+      .filter(([, ts]) => ts.some(t => t != null));
+    if (!rows.length) continue;
+    html += `<h2>${m.name}${tick === 128 ? '' : ` · ${tick} tick`}</h2><table class="board"><tr><th></th>${cols.map(([c]) => `<th>${esc(c)}</th>`).join('')}</tr>` +
+      rows.map(([label, ts]) => { const best = Math.min(...ts.map(t => t ?? 1e9)); return `<tr><td>${label}</td>${ts.map(t => `<td${t === best ? ' class="gold"' : ''}>${t != null ? fmt(t) : '—'}</td>`).join('')}</tr>`; }).join('') + '</table>';
+  }
+  const fr = Object.entries(friends());
+  return (html || '<p>No times yet.</p>') + (fr.length ? `<h2>Friends</h2><div class="grid">${fr.map(([n, f]) => `<label>${esc(n)} · updated ${new Date(f.at).toLocaleDateString()}</label><button data-unfriend="${esc(n)}">Remove</button>`).join('')}</div>` : '');
+}
+
 let backTo: Screen = 'maps';
 const NUMS: [keyof Settings, string, number][] = [
   ['gravity', 'Gravity', 10], ['airaccelerate', 'Air accelerate', 1], ['airMaxWishspeed', 'Air max wishspeed', 1],
@@ -358,19 +415,25 @@ function show(screen: Screen | null) {
   if (screen === 'maps') {
     panel.innerHTML = `<h1>SURF</h1><p>Source-engine air strafing and ramp physics, ${settings.tickrate} tick.</p><h2>Maps</h2>` +
       MAPS.map((m, i) => { const pb: PB = store.get(pbKey(m.id), {}); return `<button class="map" data-map="${i}"><div><b>${m.name}</b><span>${m.blurb ?? ''}</span></div><em>${pb.time !== undefined ? 'PB ' + fmt(pb.time) : ''}</em></button>`; }).join('') +
-      `<div class="row"><button data-go="settings">Settings</button></div><h2>Controls</h2><div class="keys">${CONTROLS.map(([k, d]) => `<span><kbd>${k}</kbd></span><span>${d}</span>`).join('')}</div>` +
+      `<div class="row"><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div><h2>Controls</h2><div class="keys">${CONTROLS.map(([k, d]) => `<span><kbd>${k}</kbd></span><span>${d}</span>`).join('')}</div>` +
       `<h2>Credits</h2><p class="credits">${MAPS.filter(m => m.credit).map(({ name, credit: c }) => `<b>${name}</b> by ${c!.by}${c!.license ? `, <a href="${c!.license[1]}" target="_blank" rel="noopener">${c!.license[0]}</a>` : ''} · <a href="${c!.source}" target="_blank" rel="noopener">source</a>`).join('<br>')}<br>Maps are the authors' unmodified files; zones and autopilot lines are this game's own.</p>`;
   } else if (screen === 'pick') {
     const d = pick!;
     panel.innerHTML = `<h1>${d.name}</h1><p>This map isn't hosted here (there's no licence to share it), so it needs your own copy: download <a href="${d.bsp!.own!.get}" target="_blank" rel="noopener">the map</a>, unzip it and choose the <b>.bsp</b>. It's kept in this browser for next time.</p>` +
       `<div class="row"><label class="button primary">Choose the .bsp…<input type="file" accept=".bsp" data-pick hidden></label><button data-go="maps">Back</button></div>`;
   } else if (screen === 'pause') {
-    panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-go="maps">Maps</button><button data-go="settings">Settings</button></div>`;
+    panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-go="maps">Maps</button><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div>`;
+  } else if (screen === 'board') {
+    panel.innerHTML = `<h1>LEADERBOARD</h1><p>Times stay in each player's browser, so they travel by link: copy yours and send it. When a friend opens it, your times join their board (they send theirs back for yours). Only runs with the standard movement settings count, and each tick rate has its own times.</p>` +
+      (boardNote ? `<p class="gold">${boardNote}</p>` : '') +
+      `<div class="grid"><label>Your name</label><input type="text" data-name maxlength="24" placeholder="name" value="${esc(myName())}"></div>` +
+      `<div class="row"><button class="primary" data-act="share">Copy my times link</button><button data-go="${backTo}">Back</button></div>` + board();
+    boardNote = '';
   } else {
     panel.innerHTML = `<h1>SETTINGS</h1><h2>Movement</h2><div class="grid"><label>Tick rate (autopilot made for 128)</label><select data-k="tickrate"><option>128</option><option>64</option><option>256</option></select>` +
       NUMS.map(([k, l, st]) => `<label>${l}</label><input type="number" step="${st}" data-k="${k}" value="${+(settings[k] as number).toFixed(4)}">`).join('') +
       BOOLS.map(([k, l]) => `<label>${l}</label><input type="checkbox" data-k="${k}" ${settings[k] ? 'checked' : ''}>`).join('') +
-      `</div><div class="row"><button class="primary" data-go="${backTo}">Back</button><button data-act="defaults">Reset to defaults</button></div>`;
+      `</div><p>Times only save with the movement settings at their defaults, as on a server (custom runs say so); each tick rate keeps its own times.</p><div class="row"><button class="primary" data-go="${backTo}">Back</button><button data-act="defaults">Reset to defaults</button></div>`;
     (panel.querySelector('select') as HTMLSelectElement).value = String(settings.tickrate);
   }
   if (screen === 'maps' || screen === 'pause') backTo = screen;
@@ -383,10 +446,18 @@ $('panel').addEventListener('click', e => {
   if (b.dataset.go) { pick = null; show(b.dataset.go as Screen); }
   if (b.dataset.act === 'resume') { show(null); lock(); }
   if (b.dataset.act === 'restart') { session.restart(); show(null); lock(); }
+  if (b.dataset.unfriend) { const fr = friends(); delete fr[b.dataset.unfriend]; store.set('surf.friends', fr); show('board'); }
+  if (b.dataset.act === 'share') {
+    const n = myName(), url = `${location.origin}${location.pathname}#times=${b64.enc({ n, d: myTimes() })}`;
+    if (!n) { boardNote = 'Enter your name first.'; return show('board'); }
+    navigator.clipboard.writeText(url).then(() => 'Link copied: paste it to your friends.', () => `Copy this link: <input class="link" readonly value="${esc(url)}">`)
+      .then(note => { boardNote = note; show('board'); });
+  }
   if (b.dataset.act === 'defaults') { Object.assign(settings, DEFAULTS); store.set('surf.settings', settings); resize(); show('settings'); }
 });
 $('panel').addEventListener('change', e => {
   const el = e.target as HTMLInputElement, k = el.dataset.k as keyof Settings;
+  if ('name' in el.dataset) store.set('surf.name', el.value.trim().slice(0, 24));
   if ('pick' in el.dataset && el.files?.[0] && pick) supply(pick, el.files[0]).catch(err => flash(`That file didn't load: ${(err as Error).message}`, 6000));
   if (!k) return;
   const v = el.type === 'checkbox' ? el.checked : Number(el.value);
@@ -431,6 +502,7 @@ function draw(t: number, now: number) {
 resize();
 buildScene(session);
 show('maps');
+openLink();
 requestAnimationFrame(frame);
 
 if (import.meta.env.DEV) { // hooks for automated checks in the browser
