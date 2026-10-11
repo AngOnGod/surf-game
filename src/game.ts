@@ -21,7 +21,7 @@ export interface MapDef {
   start?: Box; end?: Box; // run zones; staged maps default to the first stage start / last stage end
   checkpoints?: (Box & { name?: string; spawn?: Spawn; also?: Box[] })[]; // sections: split on entry, implicit fail respawn; also: extra boxes (mirrored routes)
   stages?: { name?: string; start: Box; end: Box; spawn: Spawn }[];
-  fails?: (Box & { to?: Spawn; quiet?: boolean; shape?: Shape; filter?: Filter })[]; // teleport volumes; `to` omitted: current section / stage start; quiet: not a fail; shape: exact convex volume (imported triggers)
+  fails?: (Box & { to?: Spawn; keep?: boolean; quiet?: boolean; shape?: Shape; filter?: Filter })[]; // teleport volumes; `to` omitted: current section / stage start; keep: velocity and duck kept (Source trigger_teleport); quiet: not a fail; shape: exact convex volume (imported triggers)
   pushes?: (Box & { vel: Vec; once?: boolean; set?: boolean; shape?: Shape })[]; // trigger_push: base velocity while inside; once: impulse on entry; set: velocity on entry
   route?: (Vec | [number, number, number, number])[]; // optional autopilot waypoints (4th value: riding height, see ridingLine)
   routeOnSurface?: boolean; // route points are guides ([x, y, zHint, h?]): turned into a riding line on the faces at load (see ridingLine)
@@ -196,10 +196,10 @@ export class Session {
     this.triggers();
   }
 
-  respawn(sp: Spawn) {
-    this.p.ducked = false;
+  respawn(sp: Spawn, keep = false) {
+    if (!keep) this.p.ducked = false;
     this.p.baseVel = [0, 0, 0];
-    teleport(this.c, [...sp.pos], sp.yaw, sp.pitch ?? 0);
+    teleport(this.c, [...sp.pos], sp.yaw, sp.pitch ?? 0, keep ? this.p.vel : undefined);
     this.inPush = [];
     this.snap();
   }
@@ -250,7 +250,7 @@ export class Session {
     const { def, p } = this, dt = this.c.dt;
     for (const n of def.namers ?? []) if (this.passes(n.filter) && overlaps(p, n)) this.name = n.name;
     for (const f of def.fails ?? []) {
-      if (this.passes(f.filter) && overlaps(p, f)) { this.respawn(f.to ?? this.currentSpawn()); if (!f.quiet) this.events.push({ type: 'fail' }); break; }
+      if (this.passes(f.filter) && overlaps(p, f)) { this.respawn(f.to ?? this.currentSpawn(), f.keep); if (!f.quiet) this.events.push({ type: 'fail' }); break; }
     }
     let base: Vec | null = null; // Source trigger_push: base velocity while touching, momentum kept on exit
     (def.pushes ?? []).forEach((b, i) => {

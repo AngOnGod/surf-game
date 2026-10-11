@@ -397,6 +397,28 @@ describe.skipIf(!existsSync(KITSUNE))('Source .bsp import (surf_kitsune)', () =>
       expect(res, `stage ${k} parity ${par}`).toBe('done');
     }
   }, 120_000);
+  // Source's trigger_teleport keeps velocity: each exit hands its speed on to the next stage. The in-game demo runs the
+  // map from the spawn room in one go, carrying it through every exit
+  const CHAIN: Record<number, number> = { 128: 4, 64: 3 };
+  for (const tickrate of [128, 64]) it(`exits keep speed; from the spawn room the autopilot carries it through stages 1-${CHAIN[tickrate]} at ${tickrate} tick (either tick parity)`, async () => {
+    const def = await load();
+    for (const par of [0, 1]) {
+      const s = new Session(def, { ...S, tickrate }), bot = makeBot(def.route!, s.world, s.s, undefined, true, { flags: def.routeFlags, hazard: s.hazard, bisect: def.routeCorners });
+      if (par) s.step(NO_CMD);
+      const done: number[] = [], kept: number[][] = [];
+      for (let i = 0; i < tickrate * 120 && s.stage.index < CHAIN[tickrate]; i++) { // on through the last one's exit
+        const v = hlen(s.p.vel), o = s.p.origin;
+        s.step(bot(s.p));
+        if (Math.hypot(s.p.origin[0] - o[0], s.p.origin[1] - o[1]) > 1000) kept.push([v, hlen(s.p.vel)]); // through an exit
+        const evs = s.events.splice(0);
+        expect(evs.some(e => e.type === 'fail'), `parity ${par}: fell in stage ${s.stage.index + 1}`).toBe(false);
+        for (const e of evs) if (e.type === 'stage') done.push(e.index);
+      }
+      expect(done).toEqual([...Array(CHAIN[tickrate]).keys()]);
+      expect(kept.length).toBe(CHAIN[tickrate] + 1); // the spawn room's, then each stage's exit
+      for (const [out, into] of kept) { expect(out).toBeGreaterThan(200); expect(Math.abs(into - out)).toBeLessThan(10); }
+    }
+  }, 120_000);
 });
 
 const AIRCONTROL = 'public/bsp/surf_aircontrol_ksf.bsp';

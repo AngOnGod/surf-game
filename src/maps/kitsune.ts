@@ -1,20 +1,22 @@
 import { type Box, type MapDef, type Spawn, type Station, flagsOf, routeOf } from '../game';
 import type { Vec } from '../physics';
 
-// surf_kitsune (Arblarg, 2014; CS:S, BSP v20) imported from public/maps/, shipped unmodified under its CC BY-NC-ND 4.0
-// licence with credit (CREDITS.md). Nine stages, each inside its own rainbow tube (solid, invisible until the map's reward lights it).
-// A fall onto a stage's kill floor teleports you back to that stage's start; a small teleport window at its far end
-// sends you on to the next one, and the last one returns you to the spawn room. Stage zones aren't in the map file:
-// starts are placed on each arrival platform, ends just in front of each exit window. The secret path works as in
-// the map: back out of the spawn room (you get tagged), then each stage's hidden second exit only opens for the
-// right tag, and teal's leads to the secret room with the rainbow trail. (The rainbow walls lighting up and the
-// secret room's button are left out.)
-// Most exits and gaps need a launch: climb the face and pop off its top (the autopilot plans these by look-ahead).
-// The autopilot line is verified per stage in test/ (some stages at 128 tick only); White's line is mapped only
-// through its first ridges. White is the long one: after its first ramp it threads glass grid walls and floors (window
-// brushes: solid, drawn see-through), goes east through two grid windows, crosses the north of the map and drops in at
-// the east end of a tube that runs the whole map back west to the exit window (a flood fill through free space, with
-// every step swept, finds that way through without touching a kill volume; test/).
+// surf_kitsune (Arblarg, 2014; CS:S, BSP v20) imported from public/maps/, shipped unmodified under its CC BY-NC-ND
+// 4.0 licence with credit (CREDITS.md). Nine stages, each inside its own rainbow tube (solid, invisible until the
+// map's reward lights it). A fall onto a stage's kill floor teleports you back to that stage's start; a small
+// teleport window at its far end sends you on to the next one, and the last one returns you to the spawn room.
+// Teleports keep your velocity, as in Source (only your view turns to the destination's), so you carry your speed
+// from one stage into the next. Stage zones aren't in the map file: starts are placed on each arrival platform, ends
+// just in front of each exit window. The secret path works as in the map: back out of the spawn room (you get
+// tagged), then each stage's hidden second exit only opens for the right tag, and teal's leads to the secret room
+// with the rainbow trail. (The rainbow walls lighting up and the secret room's button are left out.) Most exits and
+// gaps need a launch: climb the face and pop off its top (the autopilot plans these by look-ahead). The autopilot
+// line is verified per stage in test/ (some stages at 128 tick only), and in one go from the spawn room, carrying
+// the speed, through stages 1-4 at 128 tick (1-3 at 64), as the in-game demo runs it; White's line is mapped only
+// through its first ridges. White is the long one: after its first ramp it threads glass grid walls and floors
+// (window brushes: solid, drawn see-through), goes east through two grid windows, crosses the north of the map and
+// drops in at the east end of a tube that runs the whole map back west to the exit window (a flood fill through free
+// space, with every step swept, finds that way through without touching a kill volume; test/).
 const STAGES: { name: string; dest: string; dir: Vec }[] = [ // dir: travel direction into the exit window
   { name: 'Red', dest: 'red', dir: [0, 1, 0] },
   { name: 'Orange', dest: 'orange', dir: [0, 1, 0] },
@@ -32,19 +34,19 @@ export const STATIONS: Station[] = [
   { s: 0, g: [[-15360, -14588, 675]], h: [-1, -1] }, // Red: jump off the platform
   { s: 0, g: [[-15112, -14588, 501], [-15144, -14076, 407], [-15144, -13564, 405], [-15144, -13052, 217], [-15144, -12540, 217], [-15144, -12412, 217]], h: [0.32965874134809586, 0.5026211075502656], cut: 855.8573364472209 },
   { s: 0, g: [[-15360, -12300, 560], [-15360, -11720, 480], [-15360, -10920, 480]], h: [-1, -1] }, // launch over the bar into the exit window
-  { s: 1, g: [[-13312, -14716, -605]], h: [-1, -1] }, // Orange: jump off the platform
-  { s: 1, g: [[-13096, -14588, -681], [-13096, -14076, -725], [-13096, -13564, -769]], h: [0.5989717799505061, 0.6007612947508333], cut: 546.3823521609872 },
-  { s: 1, g: [[-13312, -13300, -420], [-13312, -12696, -624], [-13312, -11896, -624]], h: [-1, -1] }, // launch into the exit window
+  { s: 1, g: [[-13424, -15323.732528727918, -511]], h: [-1, -1] }, // Orange: jump off the platform
+  { s: 1, g: [[-13096, -14588, -681], [-13096, -14076, -725], [-13096, -13564, -769]], h: [0.5268084473851534, 0.5210421150998372], cut: 546.3823521609872 },
+  { s: 1, g: [[-13242, -13512, -364], [-13304, -12606, -643.3646518805149], [-13292, -12102, -837]], h: [-1, -1] }, // launch into the exit window
   { s: 2, g: [[-11264, -14716, -1885]], h: [-1, -1] }, // Yellow: jump off the platform
-  { s: 2, g: [[-11056, -14588, -2017], [-11056, -14076, -2107], [-11056, -13692, -2175]], h: [0.6593248734851294, 0.508533427199918] },
-  { s: 2, g: [[-10704, -13436, -2334], [-10704, -12924, -2334], [-10704, -12412, -2334]], h: [0.10726918104885455, 0.29535223699590646] },
-  { s: 2, g: [[-11056, -12028, -2403], [-11056, -11516, -2403], [-11056, -11132, -2403]], h: [0.23555055615212916, 0.97], cut: 244.96742960903794 },
-  { s: 2, g: [[-11264, -10900, -2000], [-11264, -10712, -2016], [-11264, -9912, -2016]], h: [-1, -1] }, // launch into the exit window
-  { s: 3, g: [[-8192, -14716, -3085]], h: [-1, -1] }, // Green: jump off the platform
-  { s: 3, g: [[-7984, -14716, -3255], [-7984, -14204, -3493], [-7984, -13692, -3732], [-7984, -13180, -3971], [-7984, -12668, -4210], [-7984, -12156, -4448], [-7984, -11644, -4687], [-8096, -11516, -4603]], h: [0.9170215457858684, 0.5297784636395693], cut: 1146.4046499567812 },
-  { s: 3, g: [[-8000, -11200, -4400]], h: [-1, -1] }, // launch over the gap
-  { s: 3, g: [[-7376, -10364, -4559], [-7376, -9852, -4559]], h: [0.12678082293824539, 0.5159729300632582], cut: 804.8911875394672 },
-  { s: 3, g: [[-7700, -9600, -4200], [-8192, -8760, -4224], [-8192, -7960, -4224]], h: [-1, -1] }, // launch into the exit window
+  { s: 2, g: [[-11056, -14588, -2017], [-11056, -14076, -2107], [-11056, -13692, -2175]], h: [0.6602711714750038, 0.6779575263432733] },
+  { s: 2, g: [[-10704, -13436, -2334], [-10704, -12924, -2334], [-10704, -12412, -2334]], h: [0.10287527229542581, 0.17653376355508366] },
+  { s: 2, g: [[-11056, -12028, -2403], [-11056, -11516, -2403], [-11056, -11132, -2403]], h: [0.23555055615212916, 0.97], cut: 235.2573267153385 },
+  { s: 2, g: [[-11361.334160719533, -10806.709210013476, -2086.0542395927696], [-11276.737208842575, -10787.345709296607, -2016], [-11371.150339452333, -10216.144007063314, -2493.236806800348]], h: [-1, -1] }, // launch into the exit window
+  { s: 3, g: [[-8289, -14658, -3155]], h: [-1, -1] }, // Green: jump off the platform
+  { s: 3, g: [[-7984, -14716, -3255], [-7984, -14204, -3493], [-7984, -13692, -3732], [-7984, -13180, -3971], [-7984, -12668, -4210], [-7984, -12156, -4448], [-7984, -11644, -4687], [-8096, -11516, -4603]], h: [0.5754383573163899, 0.5409146169313557], cut: 1256.7057285942483 },
+  { s: 3, g: [[-8065, -11112, -4297]], h: [-1, -1] }, // launch over the gap
+  { s: 3, g: [[-7376, -10364, -4559], [-7376, -9852, -4559]], h: [0.2581248925038087, 0.2784819572074515], cut: 842.6487878662317 },
+  { s: 3, g: [[-7478, -9493, -4199], [-8227.22697525147, -8666, -4224], [-8047.456870706291, -8096, -4224]], h: [-1, -1] }, // launch into the exit window
   { s: 4, g: [[-5120, -14716, -5549]], h: [-1, -1] }, // Teal: jump off the platform
   { s: 4, g: [[-4916, -14716, -5652], [-4916, -14204, -5885], [-4916, -13692, -6135], [-4916, -13180, -6272], [-4948, -12796, -6336]], h: [0.4262278971664154, 0.7235783602845017], cut: 218.04651718070997 },
   { s: 4, g: [[-4608, -12350, -6200], [-4608, -12176, -6330], [-4650, -11900, -6420]], h: [-1, -1], tune: true, aim: 1 }, // launch through the right-hand window

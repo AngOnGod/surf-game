@@ -415,8 +415,8 @@ function noclipMove(c: Ctx, cmd: Cmd) {
   p.onGround = false;
 }
 
-export function teleport(c: Ctx, origin: Vec, yaw: number, pitch = 0) {
-  Object.assign(c.p, { origin, vel: [0, 0, 0], yaw, pitch });
+export function teleport(c: Ctx, origin: Vec, yaw: number, pitch = 0, vel: Vec = [0, 0, 0]) {
+  Object.assign(c.p, { origin, vel, yaw, pitch });
   categorizePosition(c);
 }
 

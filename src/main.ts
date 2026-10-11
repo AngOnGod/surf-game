@@ -261,7 +261,7 @@ function startAutopilot() {
   if (!r) return flash('This map has no autopilot route');
   session.restart();
   session.assisted = true;
-  autopilot = makeBot(r, session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners });
+  autopilot = makeBot(r, session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle: true });
   flash('Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }

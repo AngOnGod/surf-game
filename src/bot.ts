@@ -21,7 +21,7 @@ function climb(p: Player, n: Vec, t: readonly number[], s: Settings): Cmd {
 /** opt.flags[i] & 1: waypoint i is what a launch must hit (a window): the autopilot plans when to start climbing by
  *  simulating a few choices with the real movement code (opt.hazard: does a player state touch a kill volume). */
 export function makeBot(route: readonly number[][], world: Brush[], s: Settings, absorb = s.tickrate < 100 ? 1 : 0, lateral = false,
-  opt: { flags?: readonly number[]; hazard?: (p: Player) => boolean; bisect?: boolean } = {}) {
+  opt: { flags?: readonly number[]; hazard?: (p: Player) => boolean; bisect?: boolean; settle?: boolean } = {}) {
   const gravity = s.gravity;
   const plan = { tick: -1e9, climb: true };
   const rollout = (p0: Player, aim: readonly number[], wait: number) => { // closest approach to aim: slide `wait` ticks, climb, fly
@@ -44,7 +44,7 @@ export function makeBot(route: readonly number[][], world: Brush[], s: Settings,
     }
     return best;
   };
-  let k = -1, last: Vec | null = null; // k: last waypoint passed; target is route[k + 1]
+  let k = -1, last: Vec | null = null, settling = false; // k: last waypoint passed; target is route[k + 1]
   let tk = -2, tn: Vec | null = null; // normal of the surf face under the current target
   const uturn = (i: number) => { // the route doubles back at waypoint i (both legs long: not riding-line jitter)
     if (i <= 0 || i + 1 >= route.length) return false;
@@ -57,9 +57,14 @@ export function makeBot(route: readonly number[][], world: Brush[], s: Settings,
     if (!last || Math.hypot(o[0] - last[0], o[1] - last[1], o[2] - last[2]) > 200) { // start or teleport: resume at the nearest waypoint
       let best = 0;
       route.forEach((q, i) => { if (Math.hypot(o[0] - q[0], o[1] - q[1], o[2] - q[2]) < Math.hypot(o[0] - route[best][0], o[1] - route[best][1], o[2] - route[best][2])) best = i; });
+      settling = !!opt.settle && !!last && best <= k; // sent back along the route (a fall)
       k = best - 1;
     }
     last = o;
+    // settle: teleports keep velocity (Source); after a fall the line restarts from a standing start, as verified: stop
+    // first (air braking at surf air accel takes a few ticks)
+    if (settling && hlen(v) > 40) { p.yaw = yawOf(v[0], v[1]); return { ...NO_CMD, fwd: -1 }; }
+    settling = false;
     const past = (i: number) => { // passed waypoint i (a link of >15000 units is a teleport: only arriving there counts)
       const q = route[i], r = route[i + 1], dx = r[0] - q[0], dy = r[1] - q[1];
       if (Math.hypot(dx, dy) >= 15000) return false;

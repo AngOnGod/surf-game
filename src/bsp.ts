@@ -18,7 +18,7 @@ export interface Bsp {
   brushes: BrushDef[];
   entities: Entity[];
   spawn: Spawn;
-  fails: (Box & { to?: Spawn; shape?: Shape; filter?: Filter })[];
+  fails: (Box & { to?: Spawn; keep?: boolean; shape?: Shape; filter?: Filter })[];
   namers: (Box & { shape: Shape; name: string; filter?: Filter })[]; // triggers that rename the player (!activator AddOutput targetname)
   pushes: (Box & { vel: Vec; once: boolean; shape?: Shape })[];
   triggers: (Box & { e: Entity })[]; // trigger_multiple / trigger_once volumes (maps wire their outputs by hand)
@@ -133,7 +133,7 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
     if (!box || e.startdisabled === '1' || (e.filtername && !filter)) continue; // (other filter kinds never pass the player)
     if (filter) Object.assign(box, { filter });
     const dest = e.target && byName.get(e.target.toLowerCase());
-    if (e.classname === 'trigger_teleport' && dest) fails.push({ ...box, to: spawnOf(dest) });
+    if (e.classname === 'trigger_teleport' && dest) fails.push({ ...box, to: spawnOf(dest), keep: true }); // keeps velocity (CTriggerTeleport::Touch passes none)
     else if (e.classname === 'trigger_hurt' && +(e.damage ?? 0) >= 100) fails.push(box); // kill volume: back to the current checkpoint
     else if (/^trigger_(multiple|once)$/.test(e.classname)) {
       triggers.push({ min: box.min, max: box.max, e });
