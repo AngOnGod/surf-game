@@ -521,18 +521,18 @@ describe('planned autopilot runs', () => {
 
 // the player's recorded runs (test/runs/, saved in-game with E) replay exactly: from their snapshot, the stored view and
 // keys finish in the stored time, without a fall (any change to the movement code that moves a human's line shows up here)
-const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625 };
+const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
 describe('recorded runs', () => {
   for (const [key, time] of Object.entries(DEMOS)) {
-    const [id, tick] = key.split('@'), m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
-    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the recorded run finishes in ${time.toFixed(3)}`, async () => {
+    const [, id, tick, stage] = key.match(/^(.*)@(\d+)(?:-s(\d+))?$/)!, m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
+    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the recorded ${stage ? `stage ${stage}` : 'run'} finishes in ${time.toFixed(3)}`, async () => {
       const def = await resolveMap(m, async () => { const b = readFileSync(file!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
       const d: Demo = JSON.parse(readFileSync(`test/runs/${key}.json`, 'utf8')), s = new Session(def, { ...S, tickrate: +tick }), bot = replayDemo(d.ticks);
       s.restore(d.snap);
       let t = -1;
       for (let i = 0; i < d.ticks.length && t < 0; i++) {
         s.step(bot(s.p));
-        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if (e.type === 'finish') t = e.time; }
+        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if ((e.type === 'stage' && !!stage && e.index === +stage - 1) || (e.type === 'finish' && !stage)) t = e.time; }
       }
       expect(t).toBe(time);
     }, 120_000);

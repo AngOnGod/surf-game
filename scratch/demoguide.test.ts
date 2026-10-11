@@ -5,7 +5,7 @@
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { type MapDef, Session } from '../src/game';
-import { DEFAULTS, type Vec } from '../src/physics';
+import { DEFAULTS, HULL_MIN, HULL_STAND, type Vec, trace } from '../src/physics';
 import { resolveMap } from '../src/bsp';
 import { type Demo, replayDemo } from '../src/plan';
 
@@ -36,16 +36,29 @@ it('guide from a recording', async () => {
   }
   // phases: runs of riding / flying, with blips (a few ticks off a face, a touch in the air) folded into their neighbours
   let ph = pts.map(p => p.ride);
-  for (const [want, min] of [[true, 8], [false, 4]] as const) for (let i = 0; i < ph.length;) {
+  for (const [want, min] of [[true, 20], [false, 4]] as const) for (let i = 0; i < ph.length;) {
     let j = i; while (j < ph.length && ph[j] === ph[i]) j++;
     if (ph[i] !== want && j - i < min && i > 0) ph.fill(want, i, j);
     i = j;
   }
-  const out: string[] = [];
+  const out: string[] = [], world = def.world!;
+  const nearFace = (o: Vec) => { const t = trace(world, [o[0], o[1], o[2] + 64], [o[0], o[1], o[2] - 256], HULL_MIN, HULL_STAND); return t.fraction < 1 && t.normal[2] > 0 && t.normal[2] < 0.7; };
   for (let i = 0; i < pts.length;) {
     let j = i; while (j < pts.length && ph[j] === ph[i]) j++;
-    const keys = simplify(pts.slice(i, j).map(p => p.o), tol).map(k => `[${k.map(v => Math.round(v)).join(', ')}]`);
-    if (keys.length >= 2) out.push(`  { g: line(${keys.join(', ')}), h: [-1, -1] }, // ${ph[i] ? 'ride' : 'fly'} ${pts[i].t.toFixed(1)}-${pts[j - 1].t.toFixed(1)} s`);
+    let seg = pts.slice(i, j).map(p => p.o), cut = 0;
+    if (!ph[i]) { while (seg.length > 2 && nearFace(seg[0])) seg.shift(); } // a flight: starts where it is clear of the face (the route bot climbs to a target with no face under it)
+    else if (j < pts.length) { // a ride before a flight: the climb to the launch (z rising at the end) is the route bot's cut
+      let k = seg.length - 1; while (k > 0 && seg[k - 1][2] <= seg[k][2]) k--;
+      for (let q = k; q + 1 < seg.length; q++) cut += Math.hypot(seg[q + 1][0] - seg[q][0], seg[q + 1][1] - seg[q][1]);
+      if (cut > 0) seg = seg.slice(0, k + 1);
+    }
+    const keys = simplify(seg, tol);
+    // S=stage: a staged map's station (explicit points every ~350 units); otherwise keys for the utopia_v3-style line() helper
+    const g = process.env.S !== undefined
+      ? keys.slice(1).flatMap((b, k) => { const a = keys[k], n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 350)); return [...Array(n).keys()].map(q => a.map((v, c) => v + ((b[c] - v) * q) / n)); }).concat([keys.at(-1)!])
+      : keys;
+    const txt = g.map(k => `[${k.map(v => Math.round(v)).join(', ')}]`).join(', ');
+    if (keys.length >= 2) out.push(`  { ${process.env.S !== undefined ? `s: ${process.env.S}, ` : ''}g: ${process.env.S !== undefined ? `[${txt}]` : `line(${txt})`}, h: [-1, -1]${cut > 0 ? `, cut: ${Math.round(cut)}` : ''} }, // ${ph[i] ? 'ride' : 'fly'} ${pts[i].t.toFixed(1)}-${pts[j - 1].t.toFixed(1)} s${cut > 0 ? ' (climb to the launch cut off)' : ''}`);
     i = j;
   }
   writeFileSync(path + '.guide.txt', out.join('\n') + '\n');
