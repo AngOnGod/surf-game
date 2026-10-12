@@ -27,7 +27,8 @@ import type { MapDef } from '../src/game';
 import { DEFAULTS, HULL_MIN, HULL_STAND, hullMax, trace, type Vec } from '../src/physics';
 import { Session, buildBrush } from '../src/game';
 import { resolveMap } from '../src/bsp';
-import { BLOCK, BOT, MOVES, encode, move, replay } from '../src/plan';
+import { BLOCK, BOT, type Demo, MOVES, encode, move, replay, replayDemo } from '../src/plan';
+import type { Snapshot } from '../src/game';
 import { makeBot } from '../src/bot';
 import { atan2 } from '../src/fmath';
 const mods = import.meta.glob<{ default: MapDef }>('../src/maps/*.ts', { eager: true });
@@ -115,10 +116,18 @@ it('beam', async () => {
   const overFloor = (o: Vec) => { const t = trace(s.world, o, [o[0], o[1], o[2] - 80], HULL_MIN, hullMax(s.p)); return t.fraction < 1 && t.normal[2] >= 0.7; }; // level ground within a hop below
   s.restart();
   const B0 = B.save();
-  const demoStart = () => { // DEMO=a recorded run: search on from its snapshot (a stage's start), along the guide from the nearest segment
-    const d = JSON.parse(readFileSync(process.env.DEMO!, 'utf8')) as { snap: Snap }, o = d.snap.p.origin;
+  const demoStart = () => { // DEMO=a recorded run: search on from its snapshot (a stage's start) or, DEMO_AT=seconds, from its state that far in (replayed at its own tick rate), along the guide from the nearest segment
+    const d = JSON.parse(readFileSync(process.env.DEMO!, 'utf8')) as { snap: Snap; tickrate: number; ticks: Demo['ticks'] };
+    let sn = d.snap;
+    if (process.env.DEMO_AT) {
+      const r = new Session(def, { ...DEFAULTS, tickrate: d.tickrate }), bot = replayDemo(d.ticks);
+      r.restore(sn as Snapshot);
+      for (let i = 0; i < +process.env.DEMO_AT * d.tickrate; i++) { r.step(bot(r.p)); r.events.length = 0; }
+      sn = r.snapshot();
+    }
+    const o = sn.p.origin;
     let j = 0; for (let k = 0; k + 1 < guide.length; k++) if (on(o, k).d < on(o, j).d) j = k;
-    return { snap: d.snap, moves: [], j, prog: on(o, j).prog };
+    return { snap: sn, moves: [], j, prog: on(o, j).prog };
   };
   const start = process.env.START ? JSON.parse(readFileSync(process.env.START, 'utf8')) as { snap: Snap; moves: number[]; j: number; prog: number } : process.env.DEMO ? demoStart() : null;
   const prefix: number[] = start?.moves ?? [], j0 = start ? Math.max(start.j, process.env.FREE ? cutAt : 0) : 0; // FREE: on from the cut (no guide)
