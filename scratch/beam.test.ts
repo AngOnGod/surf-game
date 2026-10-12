@@ -13,7 +13,7 @@
 // (no steering) is traced 1.25 s ahead: its first impact costs C * the energy the hit takes ((v·n)², none for a landing
 // along a face), an arc into a kill volume costs a fall; both weighted down with time, as steering can still change them. The beam keeps at most K states per cell of (guide segment, side offset, height off the guide, speed),
 // so lines that ride higher or wider survive alongside the greedy ones (cells: 128-unit position bins, speed bins).
-// MAP=, TICK=, W=, E=, R=; guide: the map's route, or cut where TAIL (json points) begins and continued along it.
+// MAP=, TICK=, W=, E=, R= (TAG= names the log/run files, to run two searches of one map at once); guide: the map's route, or cut where TAIL (json points) begins and continued along it.
 // CAP=x0,y0,z0,x1,y1,z1,v: inside that box, speed over v costs 2 per u/s (a launch that must not be too fast).
 // GATES=x0,y0,z0,x1,y1,z1;...: boxes to pass in order; until the last, the score is energy + G per gate passed - GW *
 // the distance to the next gate (tight sections where speed is the whole game); past the last, the usual score. PW: weight of progress against energy (default 1; low values hoard speed through tight sections).
@@ -35,7 +35,7 @@ const m = Object.values(mods).map(x => x.default).find(x => x.id === (process.en
 type Snap = { p: Session['p']; run: Session['run']; stage: Session['stage']; section: number; trail: boolean; name: string; inPush: boolean[] };
 interface Node { snap: Snap; j: number; v: number; prog: number; cell: string; parent: Node | null; m: number; g: number; bot?: unknown; pure?: boolean }
 it('beam', async () => {
-  const tick = +(process.env.TICK ?? 128), W = +(process.env.W ?? 100), K = +(process.env.K ?? 2), E = +(process.env.E ?? 0.5), L = +(process.env.L ?? 300), U = +(process.env.U ?? 1500), R = +(process.env.R ?? 1500), tag = `${m.id}@${tick}`, LOG = `scratch/beam-${tag}.log`;
+  const tick = +(process.env.TICK ?? 128), W = +(process.env.W ?? 100), K = +(process.env.K ?? 2), E = +(process.env.E ?? 0.5), L = +(process.env.L ?? 300), U = +(process.env.U ?? 1500), R = +(process.env.R ?? 1500), tag = process.env.TAG ?? `${m.id}@${tick}`, LOG = `scratch/beam-${tag}.log`;
   const def = await resolveMap(m, async () => { const b = readFileSync(['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync)!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
   const world = def.world ?? def.brushes.map(buildBrush);
   let guide = (def.route ?? []).map(q => [q[0], q[1], q[2]] as Vec), band: [number, number][] = guide.map(() => [+(process.env.A ?? 2), +(process.env.T ?? 150)]), free: boolean[] = guide.map(() => false);
@@ -112,6 +112,7 @@ it('beam', async () => {
     return 0;
   };
   const survival = (n: Node) => { const a = play(n, true); return a < Infinity ? Math.max(a, play(n, false)) : a; };
+  const overFloor = (o: Vec) => { const t = trace(s.world, o, [o[0], o[1], o[2] - 80], HULL_MIN, hullMax(s.p)); return t.fraction < 1 && t.normal[2] >= 0.7; }; // level ground within a hop below
   s.restart();
   const B0 = B.save();
   const demoStart = () => { // DEMO=a recorded run: search on from its snapshot (a stage's start), along the guide from the nearest segment
@@ -147,6 +148,7 @@ it('beam', async () => {
       const o = s.p.origin, w = where(o, n.j), vv = s.p.vel, sp = Math.hypot(vv[0], vv[1], vv[2]), energy = o[2] + sp ** 2 / (2 * g);
       const cell = [w.j, ...o.map(c => Math.round(c / 128)), Math.round(sp / 200), Math.round(vv[2] / 200)].join(); // where and how fast (slow starts in one room still spread)
       const [A, T] = band[w.j], onFace = s.p.tick - s.p.touchTick <= 1 || s.p.onGround;
+      if (!free[w.j] && w.dz < -400 && sp < 800 && (s.p.onGround || overFloor(o))) continue; // walking (or hopping) along a floor far below the line: it counts as progress but is no line, and there's no way back up (fast states skimming a ramp top are left to the score)
       if (df && free[w.j]) { const dd = dist(o); if (!Number.isFinite(dd)) continue; w.prog = cum[cutAt] + d0 - dd; }
       const cap = process.env.CAP?.split(',').map(Number);
       let pen = cap && o.every((c, k) => c >= cap[k] && c <= cap[k + 3]) ? 2 * Math.max(0, sp - cap[6]) : 0;
@@ -184,7 +186,7 @@ it('beam', async () => {
     if (!beam.length || step - bestAt >= STALL) { // died out or stalled: rewind and search wider
       if (tries >= MAXT) break;
       tries++; failProg = Math.max(failProg, bestProg);
-      const to = Math.max(...[...hist.keys()].filter(k => k <= Math.max(prefix.length, step - BLOCK * 3 * tries)));
+      const to = Math.max(...[...hist.keys()].filter(k => k <= Math.max(prefix.length, bestAt - BLOCK * 3 * tries))); // (from the last progress, not from where it died: a beam can linger a long time after the real mistake)
       beam = hist.get(to)!; width = Math.min(WMAX, W * 2 ** tries); bestAt = to; bestProg = Math.max(...beam.map(n => n.prog));
       appendFileSync(LOG, `t ${(step / BLOCK).toFixed(1)}s: ${next.length ? 'stalled' : 'everything fell'}; back to ${(to / BLOCK).toFixed(1)}s, width ${width}\n`);
       step = to - 1; continue;

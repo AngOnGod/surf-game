@@ -1,4 +1,4 @@
-import type { Box, MapDef } from '../game';
+import { type Box, type MapDef, line } from '../game';
 import type { Vec } from '../physics';
 import { cos, sin } from '../fmath';
 
@@ -8,11 +8,7 @@ import { cos, sin } from '../fmath';
 // (the checkpoints are timing splits). Timer zones and checkpoints aren't in the map file, so they're placed here by hand.
 const both = (min: Vec, max: Vec): Box[] => [{ min, max }, { min: [min[0], -max[1], min[2]], max: [max[0], -min[1], max[2]] }];
 const cp = (name: string, [a, b]: Box[]) => ({ name, ...a, also: [b] }); // timing splits (falls restart the map)
-// guides: key points densified every ~350 units, or an arc around c every 6°
-const line = (...keys: Vec[]): Vec[] => keys.slice(1).flatMap((b, i) => {
-  const a = keys[i], n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 350));
-  return [...Array(n + (i === keys.length - 2 ? 1 : 0)).keys()].map(j => a.map((v, k) => v + ((b[k] - v) * j) / n) as Vec);
-});
+// guides: line() keys (src/game.ts), or an arc around c every 6°
 const arc = (c: [number, number], r: number, a0: number, a1: number, z0: number, z1: number): Vec[] => {
   const n = Math.max(2, Math.round(Math.abs(a1 - a0) / 6));
   return [...Array(n + 1).keys()].map(j => { const t = j / n, a = ((a0 + (a1 - a0) * t) * Math.PI) / 180; return [c[0] + r * cos(a), c[1] + r * sin(a), z0 + (z1 - z0) * t]; });

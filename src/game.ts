@@ -346,6 +346,11 @@ export function ridingLine(world: Brush[], guide: number[][], hDefault = 0.62): 
  *  bottom edge, 1 = its top; -1 = keep the point as an in-air waypoint). A station followed by a launch (an in-air
  *  waypoint above: the autopilot climbs the face and pops off its top) ends `cut` units early, where the climb starts. */
 export type Station = { s: number; g: Vec[]; h: [number, number]; cut?: number; tune?: boolean; aim?: number; dive?: number[] };
+/** Guide points: key points densified every ~350 units (the last key included). */
+export const line = (...keys: Vec[]): Vec[] => keys.slice(1).flatMap((b, i) => {
+  const a = keys[i], n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 350));
+  return [...Array(n + (i === keys.length - 2 ? 1 : 0)).keys()].map(j => a.map((v, k) => v + ((b[k] - v) * j) / n) as Vec);
+});
 export const trim = (g: Vec[], cut: number): Vec[] => { // drop the last `cut` units of a polyline
   const out = [...g];
   for (let left = cut; left > 0 && out.length > 1; ) {

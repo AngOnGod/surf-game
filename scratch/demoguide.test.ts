@@ -1,7 +1,8 @@
-// Guide points from a recorded run (DEMO=file; FROM=seconds to start at, TOL=units): the line the player took,
-// simplified (Douglas-Peucker; keys forced where a ride becomes a flight or back), as map stations to paste into
-// src/maps: one station per ride or flight, every key an exact point (h -1). The route bot and the planner then learn
-// the line by finding their own inputs along it. Writes DEMO.guide.txt.
+// Guide points from a recorded run (DEMO=file; FROM=seconds to start at, TOL=units; PTS=1 for explicit points instead
+// of line() keys): the line the player took, simplified (Douglas-Peucker; keys forced where a ride becomes a flight or
+// back), as map stations to paste into src/maps: one station per ride or flight (s: the section or stage it is in),
+// every key an exact point (h -1). The route bot and the planner then learn the line by finding their own inputs along
+// it. Writes DEMO.guide.txt.
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { type MapDef, Session } from '../src/game';
@@ -28,20 +29,23 @@ it('guide from a recording', async () => {
   const from = +(process.env.FROM ?? 0), tol = +(process.env.TOL ?? 48);
   const def = await resolveMap(maps.find(m => m.id === d.map)!, read), s = new Session(def, { ...DEFAULTS, ...d.settings, tickrate: d.tickrate }), bot = replayDemo(d.ticks);
   s.restore(d.snap);
-  const pts: { o: Vec; ride: boolean; t: number }[] = [];
+  const pts: { o: Vec; ride: boolean; t: number; s: number }[] = [];
   for (let i = 0; i < d.ticks.length && s.run.state !== 'done'; i++) {
     s.step(bot(s.p)); s.events.length = 0;
     const p = s.p, n = p.lastNormal, t = (i + 1) / d.tickrate;
-    if (t >= from) pts.push({ o: [...p.origin], ride: p.onGround || (p.tick - p.touchTick <= 1 && n[2] > 0 && n[2] < 0.7), t });
+    if (t >= from) pts.push({ o: [...p.origin], ride: p.onGround || (p.tick - p.touchTick <= 1 && n[2] > 0 && n[2] < 0.7), t, s: s.section });
   }
-  // phases: runs of riding / flying, with blips (a few ticks off a face, a touch in the air) folded into their neighbours
-  let ph = pts.map(p => p.ride);
-  for (const [want, min] of [[true, 20], [false, 4]] as const) for (let i = 0; i < ph.length;) {
-    let j = i; while (j < ph.length && ph[j] === ph[i]) j++;
-    if (ph[i] !== want && j - i < min && i > 0) ph.fill(want, i, j);
-    i = j;
+  // phases: runs of riding / flying; one shorter than 0.3 s (a touch in the air, a few ticks off a face) is folded into the one before it
+  const ph = pts.map(p => p.ride), MIN = Math.round(0.3 * d.tickrate);
+  for (let again = true; again;) {
+    again = false;
+    for (let i = 0; i < ph.length;) {
+      let j = i; while (j < ph.length && ph[j] === ph[i]) j++;
+      if (i > 0 && j < ph.length && j - i < MIN) { ph.fill(ph[i - 1], i, j); again = true; }
+      i = j;
+    }
   }
-  const out: string[] = [], world = def.world!;
+  const out: string[] = [], world = def.world!, sections = !!(def.checkpoints || def.stages);
   const nearFace = (o: Vec) => { const t = trace(world, [o[0], o[1], o[2] + 64], [o[0], o[1], o[2] - 256], HULL_MIN, HULL_STAND); return t.fraction < 1 && t.normal[2] > 0 && t.normal[2] < 0.7; };
   for (let i = 0; i < pts.length;) {
     let j = i; while (j < pts.length && ph[j] === ph[i]) j++;
@@ -53,12 +57,12 @@ it('guide from a recording', async () => {
       if (cut > 0) seg = seg.slice(0, k + 1);
     }
     const keys = simplify(seg, tol);
-    // S=stage: a staged map's station (explicit points every ~350 units); otherwise keys for the utopia_v3-style line() helper
-    const g = process.env.S !== undefined
+    // PTS=1: explicit points every ~350 units; otherwise keys for the line() helper
+    const g = process.env.PTS
       ? keys.slice(1).flatMap((b, k) => { const a = keys[k], n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 350)); return [...Array(n).keys()].map(q => a.map((v, c) => v + ((b[c] - v) * q) / n)); }).concat([keys.at(-1)!])
       : keys;
     const txt = g.map(k => `[${k.map(v => Math.round(v)).join(', ')}]`).join(', ');
-    if (keys.length >= 2) out.push(`  { ${process.env.S !== undefined ? `s: ${process.env.S}, ` : ''}g: ${process.env.S !== undefined ? `[${txt}]` : `line(${txt})`}, h: [-1, -1]${cut > 0 ? `, cut: ${Math.round(cut)}` : ''} }, // ${ph[i] ? 'ride' : 'fly'} ${pts[i].t.toFixed(1)}-${pts[j - 1].t.toFixed(1)} s${cut > 0 ? ' (climb to the launch cut off)' : ''}`);
+    if (keys.length >= 2) out.push(`  { ${sections ? `s: ${pts[i].s}, ` : ''}g: ${process.env.PTS ? `[${txt}]` : `line(${txt})`}, h: [-1, -1]${cut > 0 ? `, cut: ${Math.round(cut)}` : ''} }, // ${ph[i] ? 'ride' : 'fly'} ${pts[i].t.toFixed(1)}-${pts[j - 1].t.toFixed(1)} s${cut > 0 ? ' (climb to the launch cut off)' : ''}`);
     i = j;
   }
   writeFileSync(path + '.guide.txt', out.join('\n') + '\n');

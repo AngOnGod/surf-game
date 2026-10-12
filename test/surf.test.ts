@@ -483,23 +483,7 @@ describe.skipIf(!existsSync(MESA))('Source .bsp import (surf_mesa)', () => {
       for (let k = 0; k <= n; k++) expect(touches(a.map((v, j) => v + ((c[j] - v) * k) / n) as Vec), `segment ${i}`).toBe(false);
     }
   }, 120_000);
-  // the autopilot's line is verified from the start through checkpoint 2 (the rest of the map is imported and playable)
-  it('autopilot reaches checkpoint 2 at 128 tick (either tick parity)', async () => {
-    const def = await load();
-    for (const par of [0, 1]) {
-      const s = new Session(def, S), bot = makeBot(def.route!, s.world, s.s, undefined, true, { flags: def.routeFlags, hazard: s.hazard });
-      if (par) s.step(NO_CMD);
-      let res = 'timeout', splits = 0;
-      for (let i = 0; i < 128 * 40 && res === 'timeout'; i++) {
-        s.step(bot(s.p));
-        const evs = s.events.splice(0);
-        splits += evs.filter(e => e.type === 'split').length;
-        if (evs.some(e => e.type === 'fail')) res = `fail at ${s.p.origin.map(Math.round)} (${splits} splits)`;
-        if (splits >= 2) res = 'ok';
-      }
-      expect(res, `parity ${par}`).toBe('ok');
-    }
-  }, 120_000);
+  // the autopilot: the planned runs (below) finish the map; the player's recorded run (test/runs/) is its line
 });
 
 // planned runs replay exactly: from a fresh start, the stored moves finish in the stored time, without a fall
@@ -521,7 +505,7 @@ describe('planned autopilot runs', () => {
 
 // the player's recorded runs (test/runs/, saved in-game with E) replay exactly: from their snapshot, the stored view and
 // keys finish in the stored time, without a fall (any change to the movement code that moves a human's line shows up here)
-const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
+const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'mesa@256': 64.30859375, 'kitsune@128-s5': 7.1171875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
 describe('recorded runs', () => {
   for (const [key, time] of Object.entries(DEMOS)) {
     const [, id, tick, stage] = key.match(/^(.*)@(\d+)(?:-s(\d+))?$/)!, m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
