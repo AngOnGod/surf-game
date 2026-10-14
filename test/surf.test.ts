@@ -596,15 +596,15 @@ describe.skipIf(!existsSync(PROGRESS))('Source .bsp import (surf_progress, gzipp
 
 // planned runs replay exactly: from a fresh start, the stored moves finish in the stored time, without a fall
 describe('planned autopilot runs', () => {
-  for (const [key, { run, time }] of Object.entries(RUNS)) {
+  for (const [key, { run, time, stage }] of Object.entries(RUNS)) {
     const [id, tick] = key.split('@'), m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
-    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the planned run finishes in ${time.toFixed(3)}`, async () => {
+    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the planned run finishes ${stage === undefined ? '' : `stage ${stage + 1} `}in ${time.toFixed(3)}`, async () => {
       const def = await resolveMap(m, async () => { const b = readFileSync(file!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
       const s = new Session(def, { ...S, tickrate: +tick }), bot = replay(run, +tick, makeBot(def.route ?? [], s.world, s.s, undefined, !!def.routeOnSurface, { flags: def.routeFlags, hazard: s.hazard, bisect: def.routeCorners }));
       let t = -1;
       for (let i = 0; i < +tick * (time + 5) && t < 0; i++) {
         s.step(bot(s.p));
-        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if (e.type === 'finish') t = e.time; }
+        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if ((e.type === 'finish' && stage === undefined) || (e.type === 'stage' && e.index === stage)) t = e.time; }
       }
       expect(t).toBe(time);
     }, 120_000);
@@ -613,7 +613,7 @@ describe('planned autopilot runs', () => {
 
 // the player's recorded runs (test/runs/, saved in-game with E) replay exactly: from their snapshot, the stored view and
 // keys finish in the stored time, without a fall (any change to the movement code that moves a human's line shows up here)
-const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
+const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875, 'cyberwave@256-s1': 33.23046875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
 describe('recorded runs', () => {
   for (const [key, time] of Object.entries(DEMOS)) {
     const [, id, tick, stage] = key.match(/^(.*)@(\d+)(?:-s(\d+))?$/)!, m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);

@@ -1,4 +1,4 @@
-import { type Box, type MapDef, type Spawn, type Station, flagsOf, routeOf } from '../game';
+import { type Box, type MapDef, type Spawn, type Station, flagsOf, line, routeOf } from '../game';
 import type { Vec } from '../physics';
 
 // surf_cyberwave (Mr.Cow, 2019; CS:GO, BSP v21) imported from public/maps/ as a gzipped copy of the original file
@@ -14,34 +14,34 @@ import type { Vec } from '../physics';
 // You start, and R restarts, at stage 1's start (where its portal lands you), as a timer's restart does: the map's spawn
 // room, a walk north into that portal, is skipped. Portals still lead back to it (the back of stage 1's start platform,
 // the end of stage 2), and the bonus starts from its back portal: playable, but with no timer here.
-/** Autopilot line (see Station), the east side of both stages (they're mirror images): s = the stage.
- *  Guide points are on the ramps (most are invisible clip brushes under the models), found from the map's brushes. */
+// The autopilot's stage 1 line is the player's own run (test/runs/cyberwave@256-s1.json, saved in-game; stations by
+// scratch/demoguide.test.ts): one station per ride or flight, every key an exact point; the planned run (src/runs.ts)
+// was searched along it. Stage 2's line is laid on the ramps by hand (the map's brushes): no planned run there yet.
+/** Autopilot line (see Station), the east side of both stages (they're mirror images): s = the stage. */
 export const STATIONS: Station[] = [
-  { s: 0, g: [[0, -14300, 13350]], h: [-1, -1] }, // stage 1: off the platform's north edge
-  { s: 0, g: [[250, -14200, 12800], [250, -13700, 12290], [250, -13200, 12030], [250, -12700, 11910], [250, -12100, 11880]], h: [0.5, 0.5] }, // the curved drop (a trough): its east side
-  { s: 0, g: [[300, -10900, 11400], [300, -9100, 11400]], h: [0.6, 0.6] }, // a ridge: its east face
-  { s: 0, g: [[300, -7800, 10580], [300, -6000, 10580], [300, -5100, 10720]], h: [0.6, 0.85] },
-  { s: 0, g: [[380, -4300, 11150]], h: [-1, -1] }, // hop: the next ramp is higher, its end a wall
-  { s: 0, g: [[450, -3100, 11000], [550, -1900, 11000], [1100, -900, 11000], [1900, -350, 11000], [2900, -150, 11000]], h: [0.6, 0.6] }, // the ridge curves east
-  { s: 0, g: [[4000, -250, 10480], [6100, -250, 10480]], h: [0.6, 0.85] },
-  { s: 0, g: [[6750, -330, 10650]], h: [-1, -1] }, // hop (the same height across a gap)
-  { s: 0, g: [[7400, -450, 10480], [8800, -650, 10480], [9900, -1450, 10480], [10400, -2700, 10480]], h: [0.6, 0.6] }, // the arch: around to the south
-  { s: 0, g: [[10150, -3500, 9200], [10150, -4500, 8500], [10150, -5500, 8100], [10150, -6300, 7950]], h: [0.6, 0.85] }, // down south
-  { s: 0, g: [[9950, -7000, 8150]], h: [-1, -1] }, // hop
-  { s: 0, g: [[9750, -7700, 7950], [9750, -8800, 8050], [9750, -9700, 8350]], h: [0.6, 0.6] }, // it rises at the end
-  { s: 0, g: [[9740, -10810, 9200], [10400, -11600, 9300], [11150, -11800, 9350], [11900, -11600, 9300], [12560, -10810, 9200]], h: [-1, -1] }, // the U-turn in the air, around the solid light tower (x 10240-12032, y -10240 to -8448) inside clip walls
-  { s: 0, g: [[12550, -10000, 8944], [12550, -8400, 8944]], h: [0.6, 0.85] }, // the outer ramps, north: the first, climbing it
-  { s: 0, g: [[12570, -7800, 9180]], h: [-1, -1] }, // hop the gap (the next piece's end is a wall: the drop over the gap would hit it)
-  { s: 0, g: [[12550, -7200, 8944], [12550, -5500, 8944]], h: [0.6, 0.6] },
-  { s: 0, g: [[12450, -4400, 8944], [12300, -3600, 8944], [11800, -2800, 8944]], h: [0.6, 0.6] },
-  { s: 0, g: [[10700, -2300, 8944], [10250, -1500, 8944], [10050, -500, 8944]], h: [0.6, 0.6] },
-  { s: 0, g: [[10500, 1000, 8400], [9300, 1000, 7350], [8000, 1000, 7190], [7600, 1000, 7184]], h: [0.6, 0.85] }, // west
-  { s: 0, g: [[6300, 870, 7400]], h: [-1, -1] }, // hop
-  { s: 0, g: [[5000, 750, 7184], [3200, 750, 7184]], h: [0.6, 0.6] },
-  { s: 0, g: [[1240, 950, 7000], [1300, 2000, 5900], [1300, 3000, 5550], [1300, 3700, 5520]], h: [0.8, 0.85] }, // a curved drop, north: onto its top (steep there, it falls away faster than a flight)
-  { s: 0, g: [[800, 4700, 6300]], h: [-1, -1] }, // hop up onto the last ridge
-  { s: 0, g: [[300, 5700, 6060], [300, 8400, 6060]], h: [0.4, 0.4], cut: 2400 }, // the last ridge: ride it low, then climb to its crest just as it ends
-  { s: 0, g: [[0, 13060, 6260], [0, 13700, 6200]], h: [-1, -1], aim: 0 }, // the long flight onto the platform in front of the exit portal (a planned launch)
+  { s: 0, g: line([217, -14446, 13462], [283, -14137, 12818]), h: [-1, -1] }, // fly 0.0-1.0 s
+  { s: 0, g: line([283, -14135, 12814], [186, -13853, 12398], [141, -13474, 12100], [120, -13012, 11894], [134, -12499, 11820]), h: [-1, -1] }, // ride 1.0-2.4 s
+  { s: 0, g: line([64, -11822, 11759], [182, -11202, 11736], [151, -10818, 11666], [205, -10276, 11493]), h: [-1, -1] }, // fly 2.4-3.7 s
+  { s: 0, g: line([206, -10269, 11491], [328, -9484, 11338], [357, -8934, 11302]), h: [-1, -1] }, // ride 3.7-4.5 s
+  { s: 0, g: line([356, -8926, 11302], [293, -8353, 11261], [103, -7639, 11094], [130, -6877, 10787]), h: [-1, -1] }, // fly 4.5-5.6 s
+  { s: 0, g: line([132, -6870, 10783], [312, -5675, 10573]), h: [-1, -1], cut: 705 }, // ride 5.6-6.6 s (climb to the launch cut off)
+  { s: 0, g: line([333, -4910, 10744], [380, -3644, 11007], [398, -2109, 10934]), h: [-1, -1] }, // fly 6.6-8.1 s
+  { s: 0, g: line([1182, -733, 10916], [1187, -728, 10915]), h: [-1, -1] }, // fly 8.4-8.9 s
+  { s: 0, g: line([1192, -723, 10914], [2045, -229, 10867], [3007, -56, 10865]), h: [-1, -1] }, // ride 8.9-10.0 s
+  { s: 0, g: line([3052, -57, 10864], [3718, -129, 10797], [4399, -214, 10626]), h: [-1, -1] }, // fly 10.0-10.7 s
+  { s: 0, g: line([4406, -215, 10624], [5297, -271, 10553]), h: [-1, -1], cut: 861 }, // ride 10.7-11.6 s (climb to the launch cut off)
+  { s: 0, g: line([6188, -112, 10754], [6730, -47, 10915], [7652, -271, 11024], [8079, -553, 10993], [8690, -1147, 10803], [9229, -1890, 10405], [9608, -2558, 9920], [9900, -3400, 9182], [9971, -4014, 8560]), h: [-1, -1] }, // fly 11.6-14.9 s
+  { s: 0, g: line([9971, -4022, 8552], [9934, -4752, 8078], [9944, -5622, 7915]), h: [-1, -1], cut: 814 }, // ride 14.9-15.8 s (climb to the launch cut off)
+  { s: 0, g: line([9979, -6546, 7961], [9842, -7560, 7946], [9808, -8539, 7836]), h: [-1, -1] }, // fly 15.8-16.6 s
+  { s: 0, g: line([9809, -8550, 7836], [9810, -8561, 7835]), h: [-1, -1], cut: 1388 }, // ride 16.6-17.1 s (climb to the launch cut off)
+  { s: 0, g: line([9865, -10058, 8397], [10710, -10681, 8877], [11785, -10601, 9181], [12134, -10453, 9242], [12604, -9782, 9284], [12774, -9399, 9259], [12714, -8770, 9253], [12753, -8109, 9271], [12676, -7002, 9122]), h: [-1, -1] }, // fly 17.1-20.1 s
+  { s: 0, g: line([12675, -6994, 9120], [12665, -6515, 9107]), h: [-1, -1], cut: 790 }, // ride 20.1-20.7 s (climb to the launch cut off)
+  { s: 0, g: line([12707, -5360, 9198], [12641, -4522, 9174], [12363, -3549, 8974]), h: [-1, -1] }, // fly 20.7-21.8 s
+  { s: 0, g: line([12358, -3541, 8973], [11802, -2843, 8837]), h: [-1, -1], cut: 247 }, // ride 21.8-22.3 s (climb to the launch cut off)
+  { s: 0, g: line([11638, -2637, 8867], [11355, -2049, 8965], [11249, -1516, 8990], [11281, -1159, 8979], [11575, -355, 8859], [11507, -15, 8773], [11310, 360, 8640], [10355, 957, 8125], [9729, 1064, 7734], [9033, 982, 7219]), h: [-1, -1] }, // fly 22.3-24.9 s
+  { s: 0, g: line([9025, 980, 7214], [8451, 955, 7109]), h: [-1, -1], cut: 1705 }, // ride 25.0-25.9 s (climb to the launch cut off)
+  { s: 0, g: line([6539, 1010, 7180], [4562, 868, 7073], [3044, 1046, 7021], [2285, 1160, 6882], [1440, 1714, 6578], [1247, 2029, 6431], [1132, 2753, 6086], [1199, 3538, 5633], [1230, 3780, 5595], [1175, 4197, 5664], [722, 5561, 6002], [460, 6349, 6075], [296, 7024, 6066]), h: [-1, -1] }, // fly 25.9-30.3 s
+  { s: 0, g: line([83, 8488, 6332], [-62, 9101, 6565], [-83, 9853, 6755], [-59, 10485, 6842], [94, 11161, 6860], [142, 12185, 6740], [-10, 13523, 6317]), h: [-1, -1] }, // fly 30.9-33.2 s
   { s: 1, g: [[0, -14900, -7700]], h: [-1, -1] }, // stage 2: off the platform
   { s: 1, g: [[250, -14600, -8600], [250, -13900, -9200], [250, -13000, -9500], [250, -12100, -9580]], h: [0.6, 0.6] }, // the first ridge: its east face
   { s: 1, g: [[600, -10250, -10150], [600, -9000, -10340], [600, -7600, -10340], [600, -6700, -10120]], h: [0.5, 0.5] }, // the channel: its east side

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { type Cmd, type Player, type Settings, type Vec, DEFAULTS, NO_CMD, hlen, len, viewVectors } from './physics';
 import { type Box, type GameEvent, type MapDef, Session } from './game';
 import { makeBot } from './bot';
-import { type Demo, replay } from './plan';
+import { BLOCK, type Demo, decode, replay } from './plan';
 import { RUNS } from './runs';
 import { resolveMap } from './bsp';
 import type { Look } from './look';
@@ -382,9 +382,14 @@ function startAutopilot() { // a planned run if there is one for this map and ti
   session.restart();
   session.assisted = true;
   rec = null;
-  const routeBot = (settle: boolean) => makeBot(r ?? [], session.world, settings, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle });
+  const routeBot = (settle: boolean) => makeBot(r ?? [], session.world, session.s, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle });
   autopilot = planned ? replay(planned.run, settings.tickrate, routeBot(false)) : routeBot(true); // (planned runs hand some blocks to it)
-  flash(planned ? `Autopilot: its planned run, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
+  if (planned?.stage !== undefined) { // a run of the first stages: done with its moves, it hands back (just through the stage's exit)
+    const run = autopilot;
+    let left = (decode(planned.run).length * settings.tickrate) / BLOCK;
+    autopilot = p => { if (left-- > 0) return run(p); autopilot = null; flash('Autopilot: its run ends here, over to you (R restarts)', 4000); return readCmd(); };
+  }
+  flash(planned ? `Autopilot: its planned run${planned.stage === undefined ? '' : ` of stage ${planned.stage + 1}`}, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }
 
