@@ -8,8 +8,9 @@ import type { Vec } from '../physics';
 // The map sets its own movement settings when it loads (sv_maxvelocity 7500; the rest are the defaults here), and they
 // apply on it. Zones are the map's own trigger volumes (s1_start_zone, s2_start_zone, s2_end_zone), grown by the
 // player's box, as a trigger fires on touch; stage 1 ends just before its exit portal (a teleport to stage 2). Falls
-// teleport you back to the stage's start, keeping speed as Source does. The bonus (from the spawn room's back
-// portal) is playable but has no timer here.
+// teleport you back to the stage's start, keeping speed as Source does (stage 2's start is a small player-clip cage with
+// no floor: you come out of stage 1's portal into it, lose your speed and drop out of it, so stage 2 starts from still).
+// The bonus (from the spawn room's back portal) is playable but has no timer here.
 /** Autopilot line (see Station), the east side of both stages (they're mirror images): s = the stage (-1: the spawn room).
  *  Guide points are on the ramps (most are invisible clip brushes under the models), found from the map's brushes. */
 export const STATIONS: Station[] = [

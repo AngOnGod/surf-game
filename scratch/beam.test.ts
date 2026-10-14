@@ -99,15 +99,15 @@ it('beam', async () => {
     }
     return Infinity;
   };
-  const Ca = +(process.env.C ?? 1);
+  const Ca = +(process.env.C ?? 1), ARC = +(process.env.ARC ?? 1.25);
   const arc = (n: Node) => { // airborne: penalty for where the unsteered arc goes in the next 1.25 s
     const p = n.snap.p, v = p.vel, o = p.origin, hi = hullMax(p), dt = 1 / 32;
     if (p.onGround || p.tick - p.touchTick <= 1) return 0;
     let q: Vec = [...o];
-    for (let k = 1; k <= 40; k++) {
+    for (let k = 1; k <= ARC * 32; k++) { // ARC=seconds ahead (default 1.25; long flights need more to tell a launch that makes it)
       const t = k * dt, nq: Vec = [o[0] + v[0] * t, o[1] + v[1] * t, o[2] + v[2] * t - (g * t * t) / 2], tr = trace(s.world, q, nq, HULL_MIN, hi);
-      if (tr.fraction < 1 || tr.startsolid) { const m = tr.normal, vn = v[0] * m[0] + v[1] * m[1] + (v[2] - g * t) * m[2]; return vn < 0 ? (Ca * vn * vn / (2 * g)) * (1 - t / 1.5) : 0; }
-      if (s.hazard({ ...p, origin: nq })) return 5000 * (1 - t / 1.5);
+      if (tr.fraction < 1 || tr.startsolid) { const m = tr.normal, vn = v[0] * m[0] + v[1] * m[1] + (v[2] - g * t) * m[2]; return vn < 0 ? (Ca * vn * vn / (2 * g)) * (1 - t / (ARC + 0.25)) : 0; }
+      if (s.hazard({ ...p, origin: nq })) return 5000 * (1 - t / (ARC + 0.25));
       q = nq;
     }
     return 0;

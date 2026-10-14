@@ -14,7 +14,7 @@ run() { # tag, extra env...
 }
 [ -n "$FROM" ] || { run p0 TAIL=scratch/pr-p0-tail.json DF=scratch/pr-p0-df UNTIL=-15100,-7850,13300,-14800,-7500,13700; FROM=p1; }
 case $FROM in p1) run p1 START=scratch/${P}p0.done.json RESEAT=1 TO=0 TAIL=scratch/pr-p1-tail.json DF=scratch/pr-p1-df; FROM=p2;; esac
-case $FROM in p2) run p2 START=scratch/${P}p1.done.json RESEAT=1 TO=1 TAIL=scratch/pr-p2-tail.json DF=scratch/pr-p2-df; FROM=p3a;; esac
+case $FROM in p2) run p2 START=scratch/${P}p1.done.json RESEAT=1 TO=1 TAIL=scratch/pr-p2-tail.json DF=scratch/pr-p2-df GATES=8500,-1500,-9250,9250,-550,-8750; FROM=p3a;; esac # (the gate: high over the gap, the flick up onto the portal's platform)
 case $FROM in p3a) run p3a START=scratch/${P}p2.done.json RESEAT=1 UNTIL=$FIVE UNTIL_ANY=1 TAIL=scratch/pr-p3a-tail.json DF=scratch/pr-p3a-df; FROM=p3x;; esac
 case $FROM in p3x) run p3x START=scratch/${P}p3a.done.json RESEAT=1 UNTIL=$FIVE TAIL=scratch/pr-p3x-tail.json DF=scratch/pr-p3x-df; FROM=p3c;; esac
 case $FROM in p3c) run p3c START=scratch/${P}p3x.done.json RESEAT=1 UNTIL=$FIVE TAIL=scratch/pr-p3c-tail.json DF=scratch/pr-p3c-df; FROM=p3b;; esac
