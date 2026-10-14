@@ -10,11 +10,12 @@ import type { Vec } from '../physics';
 // player's box, as a trigger fires on touch; stage 1 ends just before its exit portal (a teleport to stage 2). Falls
 // teleport you back to the stage's start, keeping speed as Source does (stage 2's start is a small player-clip cage with
 // no floor: you come out of stage 1's portal into it, lose your speed and drop out of it, so stage 2 starts from still).
-// The bonus (from the spawn room's back portal) is playable but has no timer here.
-/** Autopilot line (see Station), the east side of both stages (they're mirror images): s = the stage (-1: the spawn room).
+// You start, and R restarts, at stage 1's start (where its portal lands you), as a timer's restart does: the map's spawn
+// room, a walk north into that portal, is skipped. Portals still lead back to it (the back of stage 1's start platform,
+// the end of stage 2), and the bonus starts from its back portal: playable, but with no timer here.
+/** Autopilot line (see Station), the east side of both stages (they're mirror images): s = the stage.
  *  Guide points are on the ramps (most are invisible clip brushes under the models), found from the map's brushes. */
 export const STATIONS: Station[] = [
-  { s: -1, g: [[-9984, -2600, -1576], [-9984, -60, -1500]], h: [-1, -1] }, // the spawn room: walk into the portal to stage 1
   { s: 0, g: [[0, -14300, 13350]], h: [-1, -1] }, // stage 1: off the platform's north edge
   { s: 0, g: [[250, -14200, 12800], [250, -13700, 12290], [250, -13200, 12030], [250, -12700, 11910], [250, -12100, 11880]], h: [0.5, 0.5] }, // the curved drop (a trough): its east side
   { s: 0, g: [[300, -10900, 11400], [300, -9100, 11400]], h: [0.6, 0.6] }, // a ridge: its east face
@@ -80,7 +81,7 @@ const map: MapDef = {
       const exit1 = b.fails.find(f => f.to && small(f) && f.to.pos.every((v, k) => Math.abs(v - s2.pos[k]) < 1))!; // stage 1's exit portal
       const end1: Box = { min: [exit1.min[0] - 16, exit1.min[1] - 256, exit1.min[2] - 72], max: [exit1.max[0] + 16, exit1.min[1] - 17, exit1.max[2]] }; // the 240 units in front of it
       return {
-        brushes: b.brushes, pushes: b.pushes, spawn: b.spawn,
+        brushes: b.brushes, pushes: b.pushes, spawn: s1,
         fails: b.fails.map(f => (small(f) ? { ...f, quiet: true } : f)), // portals move you on (or back to the spawn room): not falls
         stages: [
           { name: 'Stage 1', start: zone('s1_start_zone'), end: end1, spawn: s1 },

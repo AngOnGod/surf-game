@@ -541,12 +541,17 @@ describe.skipIf(!existsSync(CYBERWAVE))('Source .bsp import (surf_cyberwave, gzi
     expect(S.maxvelocity).toBe(3500); // (the settings passed in are left as they are)
     expect(def.stages!.map(st => st.name)).toEqual(['Stage 1', 'Stage 2']);
     expect([def.props!.length, def.props!.reduce((a, p) => a + p.at.length, 0)]).toEqual([74, 283]);
-    for (let i = 0; i < 64; i++) s.step(NO_CMD);
+    for (let i = 0; i < 128; i++) s.step(NO_CMD); // (stage 1's landing point is above its platform)
     expect(s.p.onGround).toBe(true);
   }, 60_000);
-  it('walking on from the spawn takes the portal to stage 1; a solid light tower stands inside stage 1\'s U-turn', async () => {
+  it('you start, and restart, at stage 1\'s start (the spawn room is skipped); a solid light tower stands inside stage 1\'s U-turn', async () => {
     const def = await load(), s = new Session(def, S);
-    for (let i = 0; i < 128 * 20 && s.p.origin[2] < 10000; i++) s.step({ ...NO_CMD, fwd: 1 });
+    expect(def.spawn).toEqual(def.stages![0].spawn);
+    for (let i = 0; i < 128 * 3; i++) s.step({ ...NO_CMD, fwd: 1 });
+    expect(s.stage.state).toBe('running'); // walked off the platform: stage 1's timer runs
+    s.restart();
+    for (let i = 0; i < 128; i++) s.step(NO_CMD);
+    expect([s.p.onGround, s.stage.index, s.stage.state]).toEqual([true, 0, 'ready']);
     expect(s.p.origin.every((v, k) => v >= def.stages![0].start.min[k] && v <= def.stages![0].start.max[k])).toBe(true);
     expect(trace(s.world, [11136, -11200, 8704], [11136, -9344, 8704], HULL_MIN, HULL_STAND).fraction).toBeLessThan(1);
   }, 60_000);
