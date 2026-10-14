@@ -7,15 +7,19 @@ import type { Vec } from '../physics';
 // a kill pit, then the bottom run north to the blast door. The map is mirror-symmetric (x -> -x), so there are two
 // routes (east and west) and the checkpoints cover both. Falls teleport back to the spawn room, as on a server.
 // The map has no timer volumes: the start is the spawn platform, the end the blast door's trigger, the checkpoints are
-// placed by hand at the section changes. The cave rock around the route is the map's own displacements, drawn but not
-// solid (the ramps inside are brushes; the verified line never touches the rock). Left out: static props (loose rocks,
-// stalactites), the moving crystals (func_tanktrain) and the secret (it is opened with buttons: the secret door is
-// left open, the island teleport stays off).
+// placed by hand at the section changes. The cave rock around the route is the map's own displacements: solid, as in
+// Source (one-sided: from behind, the stuck check stops you dead), except the few the map flags as not solid to players.
+// The static props (stalactites, rock clusters, cacti) are drawn and solid through their collision hulls, all but one
+// stock rock model the map doesn't pack (rockcliff_cluster02b: not drawn, not solid). Left out: the moving crystals
+// (func_tanktrain) and the secret (it is opened with buttons: the secret door is left open, the island teleport stays off).
 const both = (min: Vec, max: Vec): Box[] => [{ min, max }, { min: [-max[0], min[1], min[2]], max: [-min[0], max[1], max[2]] }];
 const cp = (name: string, [a, ...also]: Box[]) => ({ name, ...a, also }); // centre ones need no mirror
 // The autopilot line is the player's own run (test/runs/mesa@256.json, saved in-game; stations by scratch/demoguide.test.ts):
-// one station per ride or flight, every key an exact point; the planned runs (src/runs.ts) were searched along it. The
-// whole course is connected (a swept flood fill from the spawn to the blast door touches no kill volume; test/).
+// one station per ride or flight, every key an exact point; the planned runs (src/runs.ts) were searched along it. That
+// run was recorded while the rock was drawn only, and it goes through rock in 7 places (under the north hall's shelf at
+// 12 s, and briefly six more times), so it no longer replays: the planned runs keep to the line where they can and go
+// around the rock and the props where it went through. The whole course is connected (a flood fill from the spawn to
+// the blast door, each step swept both ways, touches no kill volume, rock or solid prop; test/).
 // Under some kill slabs there's a solid floor with room to stand: the autopilot's searches count going there as a fall.
 /** Autopilot line (see Station), the east route: s = the section (0 = start to checkpoint 1, ...). */
 export const STATIONS: Station[] = [

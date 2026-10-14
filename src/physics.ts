@@ -128,6 +128,8 @@ export function trace(world: Brush[], start: Vec, end: Vec, mins: Vec, maxs: Vec
   const c0 = lo.map(v => Math.floor(v / CELL)), c1 = hi.map(v => Math.floor(v / CELL));
   if ((c1[0] - c0[0] + 1) * (c1[1] - c0[1] + 1) * (c1[2] - c0[2] + 1) > 4096) for (const b of world) test(b); // very long sweep
   else for (let x = c0[0]; x <= c1[0]; x++) for (let y = c0[1]; y <= c1[1]; y++) for (let z = c0[2]; z <= c1[2]; z++) for (const b of g.cells.get(cellKey(x, y, z)) ?? []) test(b);
+  const tris = (world as World).tris;
+  if (tris?.order.length && !tr.allsolid) traceTris(tr, tris, start, end, mins, maxs, lo, hi);
   if (tr.allsolid) tr.fraction = 0;
   if (tr.fraction < 1) tr.end = ma(start, tr.fraction, sub(end, start));
   return tr;
@@ -150,6 +152,142 @@ function clipBoxToBrush(tr: Trace, b: Brush, p1: Vec, p2: Vec, mins: Vec, maxs: 
   }
   if (!startout) { tr.startsolid = true; if (!getout) { tr.allsolid = true; tr.fraction = 0; } return; }
   if (enter < leave && enter > -1 && enter < tr.fraction) { tr.fraction = Math.max(enter, 0); tr.normal = clip!.n; }
+}
+
+// ---------------------------------------------------------------- displacements
+// Terrain and cave rock (Source displacements) collide triangle by triangle, as Source's CDispCollTree does: a triangle
+// is the region behind its face, inside its bounding box and inside its edges crossed with the three axes. One-sided: a
+// move away from the face never hits it, and a sweep never starts solid in one; a box at rest (start = end) is stuck
+// only where it overlaps the surface itself.
+
+/** Collision triangles with a bounding-volume tree over them. */
+export interface Tris {
+  v: Float64Array; // 3 vertices per triangle; the front is the side its winding's normal points to (counter-clockwise)
+  pl: Float64Array; // face plane per triangle: nx, ny, nz, d
+  box: Float64Array; // tree nodes: min xyz, max xyz
+  kid: Int32Array; // per node: first, count; count 0: an inner node, its children are nodes first and first + 1
+  order: Int32Array; // triangle indices, each leaf a range of them
+}
+export type World = Brush[] & { tris?: Tris };
+
+const LEAF = 4;
+/** Triangles (9 numbers each) -> collision triangles; degenerate ones are dropped. */
+export function makeTris(v: Float64Array): Tris {
+  const all = v.length / 9, pl = new Float64Array(all * 4), cen = new Float64Array(all * 3), tb = new Float64Array(all * 6), ids: number[] = [];
+  for (let t = 0; t < all; t++) {
+    const o = t * 9, ax = v[o + 3] - v[o], ay = v[o + 4] - v[o + 1], az = v[o + 5] - v[o + 2], bx = v[o + 6] - v[o], by = v[o + 7] - v[o + 1], bz = v[o + 8] - v[o + 2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (!(l > 1e-6)) continue;
+    nx /= l; ny /= l; nz /= l;
+    pl.set([nx, ny, nz, nx * v[o] + ny * v[o + 1] + nz * v[o + 2]], t * 4);
+    for (let k = 0; k < 3; k++) {
+      const lo = Math.min(v[o + k], v[o + 3 + k], v[o + 6 + k]), hi = Math.max(v[o + k], v[o + 3 + k], v[o + 6 + k]);
+      tb[t * 6 + k] = lo; tb[t * 6 + 3 + k] = hi; cen[t * 3 + k] = (lo + hi) / 2;
+    }
+    ids.push(t);
+  }
+  // top down: split each node's triangles at the median of their centres along the widest axis
+  const order = Int32Array.from(ids), n = order.length, box = new Float64Array((2 * n + 1) * 6), kid = new Int32Array((2 * n + 1) * 2);
+  const swap = (i: number, j: number) => { const t = order[i]; order[i] = order[j]; order[j] = t; };
+  let used = 1;
+  for (const stack: [number, number, number][] = [[0, 0, n]]; stack.length;) {
+    const [nd, s, e] = stack.pop()!, mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity], cmn = [...mn], cmx = [...mx];
+    for (let i = s; i < e; i++) for (let k = 0, t = order[i]; k < 3; k++) {
+      mn[k] = Math.min(mn[k], tb[t * 6 + k]); mx[k] = Math.max(mx[k], tb[t * 6 + 3 + k]);
+      cmn[k] = Math.min(cmn[k], cen[t * 3 + k]); cmx[k] = Math.max(cmx[k], cen[t * 3 + k]);
+    }
+    box.set([...mn, ...mx], nd * 6);
+    if (e - s <= LEAF) { kid[nd * 2] = s; kid[nd * 2 + 1] = e - s; continue; }
+    const w = [0, 1, 2].map(k => cmx[k] - cmn[k]), axis = w[0] >= w[1] && w[0] >= w[2] ? 0 : w[1] >= w[2] ? 1 : 2, mid = (s + e) >> 1;
+    const less = (a: number, b: number) => cen[a * 3 + axis] < cen[b * 3 + axis] || (cen[a * 3 + axis] === cen[b * 3 + axis] && a < b);
+    for (let lo = s, hi = e - 1; hi > lo;) { // quickselect: order[mid] is the median, smaller ones before it
+      const m = (lo + hi) >> 1;
+      if (less(order[m], order[lo])) swap(m, lo);
+      if (less(order[hi], order[lo])) swap(hi, lo);
+      if (less(order[m], order[hi])) swap(m, hi);
+      const p = order[hi];
+      let st = lo;
+      for (let i = lo; i < hi; i++) if (less(order[i], p)) swap(i, st++);
+      swap(st, hi);
+      if (st === mid) break;
+      if (mid < st) hi = st - 1; else lo = st + 1;
+    }
+    kid[nd * 2] = used; kid[nd * 2 + 1] = 0;
+    stack.push([used, s, mid], [used + 1, mid, e]);
+    used += 2;
+  }
+  return { v, pl, box: box.slice(0, used * 6), kid: kid.slice(0, used * 2), order };
+}
+
+// one triangle test at a time: the sweep, the box, and Source's start / end fractions (CDispCollHelper)
+const INVALID = -99999, STACK = new Int32Array(256);
+let S0: Vec = [0, 0, 0], S1: Vec = [0, 0, 0], MINS: Vec = [0, 0, 0], MAXS: Vec = [0, 0, 0], SF = INVALID, EF = 1, HIT: Vec = [0, 0, 0];
+
+/** A plane of the triangle's shape, pushed out by the box: false = the sweep misses the triangle (ResolveRayPlaneIntersect). */
+function sweepPlane(nx: number, ny: number, nz: number, d: number) {
+  const dist = d - ((nx < 0 ? MAXS[0] : MINS[0]) * nx + (ny < 0 ? MAXS[1] : MINS[1]) * ny + (nz < 0 ? MAXS[2] : MINS[2]) * nz);
+  const d1 = S0[0] * nx + S0[1] * ny + S0[2] * nz - dist, d2 = S1[0] * nx + S1[1] * ny + S1[2] * nz - dist;
+  if (d1 > 0 && d2 > 0) return false;
+  if (d1 < 0 && d2 < 0) return true;
+  const den = d1 - d2;
+  if (d1 >= 0 && d2 <= 0) { const f = den !== 0 ? (d1 - DIST_EPSILON) / den : 0; if (f > SF) { SF = f; HIT = [nx, ny, nz]; } }
+  else { const f = den !== 0 ? (d1 + DIST_EPSILON) / den : 0; if (f < EF) EF = f; }
+  return true;
+}
+/** The same plane for a box at rest: false = the box is wholly in front of it. */
+const restPlane = (nx: number, ny: number, nz: number, d: number) =>
+  S0[0] * nx + S0[1] * ny + S0[2] * nz - (d - ((nx < 0 ? MAXS[0] : MINS[0]) * nx + (ny < 0 ? MAXS[1] : MINS[1]) * ny + (nz < 0 ? MAXS[2] : MINS[2]) * nz)) <= 0;
+
+/** The triangle's bounding box and its edges crossed with the axes (an axis-aligned edge plane is a box plane already). */
+function sides(v: Float64Array, o: number, plane: (nx: number, ny: number, nz: number, d: number) => boolean) {
+  for (let k = 0; k < 3; k++) {
+    const lo = Math.min(v[o + k], v[o + 3 + k], v[o + 6 + k]), hi = Math.max(v[o + k], v[o + 3 + k], v[o + 6 + k]);
+    if (!plane(k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0, hi) || !plane(k === 0 ? -1 : 0, k === 1 ? -1 : 0, k === 2 ? -1 : 0, -lo)) return false;
+  }
+  for (let k = 0; k < 3; k++) {
+    const a = o + k * 3, b = o + ((k + 1) % 3) * 3, c = o + ((k + 2) % 3) * 3, ex = v[b] - v[a], ey = v[b + 1] - v[a + 1], ez = v[b + 2] - v[a + 2];
+    for (let axis = 0; axis < 3; axis++) {
+      let nx = 0, ny = 0, nz = 0;
+      if (axis === 0) { if (ey === 0 || ez === 0) continue; ny = ez; nz = -ey; }
+      else if (axis === 1) { if (ex === 0 || ez === 0) continue; nx = -ez; nz = ex; }
+      else { if (ex === 0 || ey === 0) continue; nx = ey; ny = -ex; }
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      nx /= l; ny /= l; nz /= l;
+      let d = nx * v[a] + ny * v[a + 1] + nz * v[a + 2];
+      if (nx * v[c] + ny * v[c + 1] + nz * v[c + 2] > d) { nx = -nx; ny = -ny; nz = -nz; d = -d; } // the triangle behind it
+      if (!plane(nx, ny, nz, d)) return false;
+    }
+  }
+  return true;
+}
+
+function traceTris(tr: Trace, T: Tris, start: Vec, end: Vec, mins: Vec, maxs: Vec, lo: number[], hi: number[]) {
+  const dx = end[0] - start[0], dy = end[1] - start[1], dz = end[2] - start[2], dl = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const { v, pl, box, kid, order } = T;
+  S0 = start; S1 = end; MINS = mins; MAXS = maxs;
+  let top = 0;
+  STACK[top++] = 0;
+  while (top) {
+    const nd = STACK[--top], b = nd * 6;
+    if (box[b] > hi[0] || box[b + 1] > hi[1] || box[b + 2] > hi[2] || box[b + 3] < lo[0] || box[b + 4] < lo[1] || box[b + 5] < lo[2]) continue;
+    const first = kid[nd * 2], count = kid[nd * 2 + 1];
+    if (!count) { STACK[top++] = first; STACK[top++] = first + 1; continue; }
+    for (let i = first; i < first + count; i++) {
+      const t = order[i], o = t * 9, nx = pl[t * 4], ny = pl[t * 4 + 1], nz = pl[t * 4 + 2], d = pl[t * 4 + 3];
+      if (dl === 0) { // a box at rest: stuck if it overlaps the surface (in front of no plane, and not wholly behind the face)
+        const back = S0[0] * nx + S0[1] * ny + S0[2] * nz + (nx < 0 ? MINS[0] : MAXS[0]) * nx + (ny < 0 ? MINS[1] : MAXS[1]) * ny + (nz < 0 ? MINS[2] : MAXS[2]) * nz;
+        if (back >= d && restPlane(nx, ny, nz, d) && sides(v, o, restPlane)) { tr.startsolid = tr.allsolid = true; tr.fraction = 0; return; }
+        continue;
+      }
+      if ((nx * dx + ny * dy + nz * dz) / dl > DIST_EPSILON) continue; // moving away from the face: one-sided
+      SF = INVALID; EF = 1;
+      if (!sweepPlane(nx, ny, nz, d)) continue; // (the face again last, as Source orders them: it decides ties)
+      SF = INVALID; EF = 1;
+      if (!sides(v, o, sweepPlane) || !sweepPlane(nx, ny, nz, d)) continue;
+      if (SF !== INVALID && (SF < EF || Math.abs(SF - EF) < 0.001) && SF < tr.fraction) { tr.fraction = Math.max(SF, 0); tr.normal = HIT; }
+    }
+  }
 }
 
 // ---------------------------------------------------------------- movement

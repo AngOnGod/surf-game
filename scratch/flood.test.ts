@@ -1,13 +1,13 @@
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { HULL_DUCK, HULL_MIN, HULL_STAND, trace } from '../src/physics';
-import { parseBsp } from '../src/bsp';
+import { parseBsp, unpack } from '../src/bsp';
 import { buildBrush } from '../src/game';
 // 3D flood fill (BFS) of hull-free cells from START, never touching a teleport/kill trigger's exact shape; writes the
 // shortest cell path to the reachable cell nearest GOAL (OUT, JSON) and a summary. DUCK=1: a ducked player's hull
-it('flood', () => {
+it('flood', async () => {
   const HULL = process.env.DUCK ? HULL_DUCK : HULL_STAND, H = HULL[2];
-  const b = readFileSync(process.env.BSP!), bsp = parseBsp(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)), w = bsp.brushes.map(buildBrush);
+  const b = readFileSync(process.env.BSP!), bsp = parseBsp(await unpack(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))), w = Object.assign(bsp.brushes.map(buildBrush), { tris: bsp.tris }); // displacements too: two-sided below (from behind, Source's stuck check stops you dead)
   const [x0, y0, z0, x1, y1, z1] = process.env.BOX!.split(',').map(Number), C = +(process.env.CELL ?? 96), start = process.env.START!.split(',').map(Number), goal = process.env.GOAL!.split(',').map(Number);
   const nx = Math.ceil((x1 - x0) / C), ny = Math.ceil((y1 - y0) / C), nz = Math.ceil((z1 - z0) / C), N = nx * ny * nz;
   const P = (id: number): [number, number, number] => { const k = Math.floor(id / (nx * ny)), j = Math.floor((id % (nx * ny)) / nx), i = id % nx; return [x0 + i * C, y0 + j * C, z0 + k * C]; };
@@ -33,7 +33,7 @@ it('flood', () => {
       if (a < 0 || bb < 0 || c < 0 || a >= nx || bb >= ny || c >= nz) continue;
       const n = (c * ny + bb) * nx + a;
       if (!free(n)) continue;
-      if (process.env.SWEEP) { const pa = P(id), pb = P(n), t = trace(w, pa, pb, HULL_MIN, HULL); if (t.fraction < 1 || t.startsolid) continue; } // a wall between the two cells
+      if (process.env.SWEEP) { const pa = P(id), pb = P(n), t = trace(w, pa, pb, HULL_MIN, HULL), u = trace(w, pb, pa, HULL_MIN, HULL); if (t.fraction < 1 || t.startsolid || u.fraction < 1) continue; } // a wall between the two cells
       state[n] = 3; parent[n] = id; queue[tail++] = n;
     }
   }

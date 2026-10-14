@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   type Cmd, type Vec, DEFAULTS, HULL_MIN, HULL_STAND, NO_CMD, accelerate, airAccelerate, categorizePosition, clipVelocity,
-  ctx, dot, friction, hlen, len, newPlayer, playerMove, trace,
+  ctx, dot, friction, hlen, len, makeTris, newPlayer, playerMove, trace,
 } from '../src/physics';
 import { type MapDef, type Spawn, Session, buildBrush } from '../src/game';
 import { makeBot } from '../src/bot';
@@ -213,6 +213,41 @@ describe('rampbug fix', () => {
         expect(trace(s.world, s.p.origin, s.p.origin, HULL_MIN, HULL_STAND).startsolid).toBe(false);
       }
     }
+  });
+});
+
+describe('displacement collision (terrain, cave rock)', () => {
+  // a 4096-unit square of two triangles: a floor (facing up) or a wall (facing -x), like a flat displacement
+  const sq = (pts: Vec[]) => makeTris(new Float64Array([...pts[0], ...pts[1], ...pts[2], ...pts[0], ...pts[2], ...pts[3]]));
+  const floor = sq([[-2048, -2048, 0], [2048, -2048, 0], [2048, 2048, 0], [-2048, 2048, 0]]); // counter-clockwise from above
+  const wall = sq([[0, -2048, -2048], [0, -2048, 2048], [0, 2048, 2048], [0, 2048, -2048]]); // faces -x
+  const only = (t: ReturnType<typeof makeTris>) => Object.assign([] as ReturnType<typeof buildBrush>[], { tris: t });
+  it('a floor holds you up: you land, stand and walk on it', () => {
+    const p = newPlayer([0, 0, 100]), c = ctx(p, only(floor), S);
+    for (let i = 0; i < 128; i++) playerMove(c, NO_CMD);
+    expect(p.onGround).toBe(true);
+    expect(p.origin[2]).toBeGreaterThanOrEqual(0);
+    expect(p.origin[2]).toBeLessThan(0.1);
+    p.yaw = 30;
+    for (let i = 0; i < 128; i++) playerMove(c, { ...NO_CMD, fwd: 1 });
+    expect([p.onGround, Math.round(hlen(p.vel))]).toEqual([true, 250]);
+  });
+  it('a wall stops you from its front; from behind you pass through (one-sided, as in Source)', () => {
+    const w = only(wall);
+    const into = trace(w, [-200, 0, 0], [200, 0, 0], HULL_MIN, HULL_STAND);
+    expect(into.fraction).toBeLessThan(1);
+    expect(into.end[0]).toBeCloseTo(-16 - 0.03125, 3);
+    expect(into.normal).toEqual([-1, 0, 0]);
+    expect(trace(w, [200, 0, 0], [-200, 0, 0], HULL_MIN, HULL_STAND).fraction).toBe(1);
+    const p = newPlayer([-400, 0, 0]), c = ctx(p, w, S);
+    p.vel = [1200, 300, 0];
+    for (let i = 0; i < 64; i++) playerMove(c, NO_CMD);
+    expect(p.origin[0]).toBeLessThan(-15.9);
+    expect(p.vel[1]).toBeGreaterThan(200); // slid along it
+  });
+  it('a box at rest is stuck only where it overlaps the surface itself', () => {
+    const w = only(wall), at = (x: number) => trace(w, [x, 0, 0], [x, 0, 0], HULL_MIN, HULL_STAND).startsolid;
+    expect([at(-17), at(-15), at(0), at(15), at(17), at(300)]).toEqual([false, true, true, true, false, false]);
   });
 });
 
@@ -469,21 +504,78 @@ describe.skipIf(!existsSync(MESA))('Source .bsp import (surf_mesa)', () => {
     expect(def.checkpoints!.length).toBe(6);
   }, 60_000);
   it('the whole course goes through: a clear way from the spawn room to the blast door, touching no kill volume', async () => {
-    // a flood fill through free space (each step swept) shortened to clear segments (it doesn't model gravity: it shows
-    // the course is connected, not that a given line through it is fast enough)
-    const WAY: Vec[] = [[-32, -480, 10272], [992, 5664, 9120], [992, 5664, 7584], [992, 8352, 7584], [1504, 11680, 7584], [2528, 14368, 7584], [14432, 14368, 7584], [14432, 4640, 5408], [14432, 4640, 4640], [14432, 1952, 4640], [14048, -224, 4512], [14048, -9312, 4512], [7776, -9312, 4256], [7776, -1888, 3104], [7776, 8480, 2336], [7776, 9248, 2336], [480, 9248, 2336], [480, -2912, -2144], [480, -6752, -3424], [480, -6752, -4704], [-32, -6752, -11360], [-32, 13984, -12128], [-32, 14112, -12256], [-32, 14368, -12256]];
+    // a flood fill through free space (each step swept both ways: the cave rock is solid from the front, and from behind
+    // Source stops you dead) shortened to clear segments, around the rock and the solid props (it doesn't model gravity:
+    // it shows the course is connected, not that a given line through it is fast enough)
+    const WAY: Vec[] = [[-32, -480, 10272], [-320, 4320, 9792], [-320, 4320, 9504], [-320, 4896, 7872], [-320, 5376, 7104], [-320, 5952, 6912], [-320, 6624, 6816], [-320, 7488, 6816], [-416, 12096, 6816], [-512, 12480, 6816], [-2528, 14400, 6816], [-4064, 14592, 6816], [-12320, 14400, 6816], [-12608, 14112, 6816], [-13664, 13920, 6816], [-13760, 13728, 6816], [-14048, 13440, 6816], [-14624, 11808, 6816], [-14624, 7968, 6720], [-14624, 4896, 4608], [-14624, 4704, 3360], [-14624, 3552, 2976], [-14624, 2400, 2976], [-14432, -192, 3264], [-14432, -5184, 3360], [-14432, -8064, 3168], [-14432, -8832, 3168], [-14240, -9216, 3168], [-13088, -10080, 3168], [-12512, -10176, 3168], [-10592, -10272, 3168], [-9152, -9984, 3168], [-9152, -9792, 3072], [-9056, -6240, 2784], [-9056, -6144, 2688], [-9056, -5376, 2304], [-9056, -3552, 2208], [-9056, 0, 1824], [-9056, 2304, 1536], [-9056, 6144, 1344], [-9056, 6336, 1536], [-9056, 6240, 1824], [-9056, 6240, 1920], [-7712, 6240, 1920], [-7712, 9312, 1920], [-1184, 9792, 1920], [-1184, 9792, 1632], [-896, 9792, 1344], [-320, 8448, 1248], [-320, 768, -1440], [-320, -192, -2016], [-320, -1920, -2784], [-320, -3264, -3072], [-320, -3744, -3264], [-128, -3936, -3264], [-128, -4320, -3264], [-32, -9504, -3552], [-32, -9504, -4800], [-32, -7104, -10848], [-32, -6720, -11424], [-32, -6336, -11520], [-32, -480, -11616], [-32, 14016, -12000], [-32, 14112, -12288], [-32, 14400, -12288], [-32, 14400, -12192]];
     const b = parseBsp(await read()), def = await load(), s = new Session(def, S);
     const touches = (p: Vec) => b.fails.some(f => p[0] + 16 > f.min[0] && p[0] - 16 < f.max[0] && p[1] + 16 > f.min[1] && p[1] - 16 < f.max[1] && p[2] + 72 > f.min[2] && p[2] < f.max[2]
       && (!f.shape || f.shape.some(br => br.every(([a, c, e, d]) => Math.min(...[0, 1, 2, 3, 4, 5, 6, 7].map(k => a * (p[0] + (k & 1 ? 16 : -16)) + c * (p[1] + (k & 2 ? 16 : -16)) + e * (p[2] + (k & 4 ? 72 : 0)))) <= d))));
     expect(WAY[0].every((v, k) => v >= def.start!.min[k] - 300 && v <= def.start!.max[k] + 300)).toBe(true);
     expect(Math.hypot(...([0, 1, 2].map(k => WAY.at(-1)![k] - (def.end!.min[k] + def.end!.max[k]) / 2)) as Vec)).toBeLessThan(300);
     for (let i = 1; i < WAY.length; i++) {
-      const a = WAY[i - 1], c = WAY[i], t = trace(s.world, a, c, HULL_MIN, HULL_STAND), n = Math.ceil(len(c.map((v, k) => v - a[k]) as Vec) / 24);
-      expect(t.fraction === 1 && !t.startsolid, `segment ${i}`).toBe(true);
+      const a = WAY[i - 1], c = WAY[i], t = trace(s.world, a, c, HULL_MIN, HULL_STAND), u = trace(s.world, c, a, HULL_MIN, HULL_STAND), n = Math.ceil(len(c.map((v, k) => v - a[k]) as Vec) / 24);
+      expect(t.fraction === 1 && !t.startsolid && u.fraction === 1, `segment ${i}`).toBe(true);
       for (let k = 0; k <= n; k++) expect(touches(a.map((v, j) => v + ((c[j] - v) * k) / n) as Vec), `segment ${i}`).toBe(false);
     }
   }, 120_000);
+  it('the cave rock is solid (but for the few displacements the map flags as not), and so are the solid static props', async () => {
+    const def = await load(), s = new Session(def, S), rock = Object.assign([], { tris: def.tris });
+    expect([def.terrain!.pos.length / 9, def.tris!.order.length]).toEqual([183552, 175360]); // 64 of 1434 displacements: no hull collision
+    // where the player's recording flew under the north hall's rock shelf (it was drawn only then): stuck in it now
+    expect(trace(rock, [3623, 14816, 7220], [3623, 14816, 7220], HULL_MIN, HULL_STAND).startsolid).toBe(true);
+    expect(trace(rock, [3623, 14816, 7000], [3623, 14816, 7000], HULL_MIN, HULL_STAND).startsolid).toBe(false);
+    expect([def.props!.length, def.props!.reduce((a, p) => a + p.at.length, 0)]).toEqual([15, 212]); // (one stock rock model isn't packed)
+    const t = trace(s.world, [-1400, 11456, -10950], [-400, 11456, -10950], HULL_MIN, HULL_STAND); // through a stalactite
+    expect(t.fraction).toBeLessThan(1);
+  }, 60_000);
   // the autopilot: the planned runs (below) finish the map; the player's recorded run (test/runs/) is its line
+});
+
+const CYBERWAVE = 'public/maps/surf_cyberwave.bsp.gz';
+describe.skipIf(!existsSync(CYBERWAVE))('Source .bsp import (surf_cyberwave, gzipped, CS:GO v21)', () => {
+  const load = () => resolveMap(mapDefs.find(m => m.id === 'cyberwave')!, async () => { const b = readFileSync(CYBERWAVE); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
+  it('the map\'s own settings (max velocity 7500), its stage zones, its models; spawns on the ground', async () => {
+    const def = await load(), s = new Session(def, S);
+    expect(s.s.maxvelocity).toBe(7500);
+    expect(S.maxvelocity).toBe(3500); // (the settings passed in are left as they are)
+    expect(def.stages!.map(st => st.name)).toEqual(['Stage 1', 'Stage 2']);
+    expect([def.props!.length, def.props!.reduce((a, p) => a + p.at.length, 0)]).toEqual([74, 283]);
+    for (let i = 0; i < 64; i++) s.step(NO_CMD);
+    expect(s.p.onGround).toBe(true);
+  }, 60_000);
+  it('walking on from the spawn takes the portal to stage 1; a solid light tower stands inside stage 1\'s U-turn', async () => {
+    const def = await load(), s = new Session(def, S);
+    for (let i = 0; i < 128 * 20 && s.p.origin[2] < 10000; i++) s.step({ ...NO_CMD, fwd: 1 });
+    expect(s.p.origin.every((v, k) => v >= def.stages![0].start.min[k] && v <= def.stages![0].start.max[k])).toBe(true);
+    expect(trace(s.world, [11136, -11200, 8704], [11136, -9344, 8704], HULL_MIN, HULL_STAND).fraction).toBeLessThan(1);
+  }, 60_000);
+});
+
+const PROGRESS = 'public/maps/surf_progress_fix.bsp.gz';
+describe.skipIf(!existsSync(PROGRESS))('Source .bsp import (surf_progress, gzipped)', () => {
+  const load = () => resolveMap(mapDefs.find(m => m.id === 'progress')!, async () => { const b = readFileSync(PROGRESS); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
+  it('a hub, four parts from the map\'s own zones, its models; spawns on the ground in the hub', async () => {
+    const def = await load(), s = new Session(def, S);
+    expect(def.stages!.map(st => st.name)).toEqual(['Part 1', 'Part 2', 'Part 3', 'Part 4']);
+    expect(def.props!.reduce((a, p) => a + p.at.length, 0)).toBe(428);
+    for (let i = 0; i < 64; i++) s.step(NO_CMD);
+    expect([s.p.onGround, Math.round(s.p.origin[0]), Math.round(s.p.origin[1])]).toEqual([true, 11968, 10016]);
+  }, 60_000);
+  it('part 3\'s last section is ridden three times: each exit opens part 4 only once you hold the other two letters', async () => {
+    const def = await load(), s = new Session(def, S), five = [9408, -13312, -11936];
+    const exit = (x: number, y: number) => { // drop into an exit (two tilted slabs: back to its pad first, then on to part 4), then on through whatever it leads to
+      s.p.origin = [x, y, -15100]; s.p.vel = [0, 0, -900];
+      for (let i = 0; i < 128 && s.p.origin[2] < -14000; i++) s.step(NO_CMD);
+      s.step(NO_CMD);
+      return s.p.origin.map(Math.round);
+    };
+    s.name = 'target_default';
+    expect([exit(6341, -4934), s.name]).toEqual([five, 'target_a']); // exit A: back by pad A (tagged a), on into the section again
+    expect([exit(12538, -4930), s.name]).toEqual([five, 'target_ac']); // exit C: not yet (needs a and b); pad C: tagged a and c
+    const at = exit(9440, -3314); // exit B: a and c held, so on to part 4
+    expect([s.stage.index, at[0], at[1]]).toEqual([3, 14912, 5216]);
+  }, 60_000);
 });
 
 // planned runs replay exactly: from a fresh start, the stored moves finish in the stored time, without a fall
@@ -505,7 +597,7 @@ describe('planned autopilot runs', () => {
 
 // the player's recorded runs (test/runs/, saved in-game with E) replay exactly: from their snapshot, the stored view and
 // keys finish in the stored time, without a fall (any change to the movement code that moves a human's line shows up here)
-const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'mesa@256': 64.30859375, 'kitsune@128-s5': 7.1171875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
+const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
 describe('recorded runs', () => {
   for (const [key, time] of Object.entries(DEMOS)) {
     const [, id, tick, stage] = key.match(/^(.*)@(\d+)(?:-s(\d+))?$/)!, m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);

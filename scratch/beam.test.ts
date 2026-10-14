@@ -25,7 +25,7 @@ import { it } from 'vitest';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import type { MapDef } from '../src/game';
 import { DEFAULTS, HULL_MIN, HULL_STAND, hullMax, trace, type Vec } from '../src/physics';
-import { Session, buildBrush } from '../src/game';
+import { Session, buildWorld } from '../src/game';
 import { resolveMap } from '../src/bsp';
 import { BLOCK, BOT, type Demo, MOVES, encode, move, replay, replayDemo } from '../src/plan';
 import type { Snapshot } from '../src/game';
@@ -38,7 +38,7 @@ interface Node { snap: Snap; j: number; v: number; prog: number; cell: string; p
 it('beam', async () => {
   const tick = +(process.env.TICK ?? 128), W = +(process.env.W ?? 100), K = +(process.env.K ?? 2), E = +(process.env.E ?? 0.5), L = +(process.env.L ?? 300), U = +(process.env.U ?? 1500), R = +(process.env.R ?? 1500), tag = process.env.TAG ?? `${m.id}@${tick}`, LOG = `scratch/beam-${tag}.log`;
   const def = await resolveMap(m, async () => { const b = readFileSync(['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync)!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
-  const world = def.world ?? def.brushes.map(buildBrush);
+  const world = def.world ?? buildWorld(def);
   let guide = (def.route ?? []).map(q => [q[0], q[1], q[2]] as Vec), band: [number, number][] = guide.map(() => [+(process.env.A ?? 2), +(process.env.T ?? 150)]), free: boolean[] = guide.map(() => false);
   if (process.env.TAIL) {
     const tail: Vec[] = JSON.parse(readFileSync(process.env.TAIL, 'utf8')), d = (q: Vec) => Math.hypot(q[0] - tail[0][0], q[1] - tail[0][1], q[2] - tail[0][2]);
@@ -129,9 +129,18 @@ it('beam', async () => {
     let j = 0; for (let k = 0; k + 1 < guide.length; k++) if (on(o, k).d < on(o, j).d) j = k;
     return { snap: sn, moves: [], j, prog: on(o, j).prog };
   };
-  const start = process.env.START ? JSON.parse(readFileSync(process.env.START, 'utf8')) as { snap: Snap; moves: number[]; j: number; prog: number } : process.env.DEMO ? demoStart() : null;
+  const stageStart = () => { // STAGE=index: from that stage's spawn, standing (a check of one stage's line; a real run carries speed in)
+    s.restart(); s.respawn(def.stages![+process.env.STAGE!].spawn); s.events.length = 0;
+    const sn = snap(), o = sn.p.origin;
+    let j = 0; for (let k = 0; k + 1 < guide.length; k++) if (on(o, k).d < on(o, j).d) j = k;
+    return { snap: sn, moves: [], j, prog: on(o, j).prog };
+  };
+  const start = process.env.START ? JSON.parse(readFileSync(process.env.START, 'utf8')) as { snap: Snap; moves: number[]; j: number; prog: number } : process.env.DEMO ? demoStart() : process.env.STAGE ? stageStart() : null;
+  if (start && process.env.RESEAT) { const o = start.snap.p.origin; let j = 0; for (let k = 0; k + 1 < guide.length; k++) if (on(o, k).d < on(o, j).d) j = k; start.j = j; start.prog = on(o, j).prog; } // RESEAT=1: a snapshot from another search (its guide): find it on this one
   const prefix: number[] = start?.moves ?? [], j0 = start ? Math.max(start.j, process.env.FREE ? cutAt : 0) : 0; // FREE: on from the cut (no guide)
   const TO = +(process.env.TO ?? -1); // TO=stage index: done when that stage is completed (a staged map's run through it), not at the map's finish
+  const botzone = (process.env.BOTZONE ?? '').split(';').filter(Boolean).map(z => z.split(',').map(Number)); // BOTZONE=x0,y0,z0,x1,y1,z1;...: boxes where only the autopilot's move is tried (a stretch it rides well)
+  const until = process.env.UNTIL?.split(',').map(Number); // UNTIL=x0,y0,z0,x1,y1,z1: done when a teleport puts you in that box (a phase of a longer run)
   const gates = (process.env.GATES ?? '').split(';').filter(Boolean).map(s => s.split(',').map(Number)), GW = +(process.env.GW ?? 0.1);
   let beam: Node[] = [{ snap: start?.snap ?? snap(), j: j0, v: 0, prog: start?.prog ?? 0, cell: '', parent: null, m: 0, g: 0, pure: moves.includes(BOT) && !process.env.START }], done: { node: Node; time: number } | null = null;
   writeFileSync(LOG, `${tag} W ${W} K ${K} E ${E} R ${R} A,T ${band[0]} tail ${band.at(-1)}: guide ${guide.length} points (${riding.filter(Boolean).length} segments riding), ${Math.round(cum.at(-1)!)} long\n`);
@@ -143,22 +152,25 @@ it('beam', async () => {
   for (let step = prefix.length; step < BLOCK * +(process.env.SECS ?? 240) && !done; step++) {
     if (step % BLOCK === 0) hist.set(step, beam);
     const next: Node[] = [];
-    for (const n of beam) for (const mi of moves) {
+    for (const n of beam) for (const mi of botzone.some(z => n.snap.p.origin.every((v, k) => v >= z[k] && v <= z[k + 3])) ? [BOT] : moves) { // BOTZONE: there the route-following autopilot drives
       restore(n.snap);
       if (mi === BOT) B.load(n.bot as ReturnType<typeof B.save> ?? B0);
       let dead = false, fin = -1;
       for (let i = 0; i < per && !dead; i++) {
+        const was = s.p.origin;
         s.step(mi === BOT ? B(s.p) : move(s.p, mi));
+        if (until && fin < 0 && until.every((v, k) => (k < 3 ? s.p.origin[k] >= v : s.p.origin[k - 3] <= v)) && (process.env.UNTIL_ANY || Math.hypot(s.p.origin[0] - was[0], s.p.origin[1] - was[1], s.p.origin[2] - was[2]) > 500)) fin = s.p.tick / tick; // UNTIL: teleported into that box (UNTIL_ANY=1: got there at all)
         for (const e of s.events) { if (e.type === 'fail') dead = true; if (e.type === 'finish' || (e.type === 'stage' && e.index === TO)) fin = s.run.time; }
         s.events.length = 0;
-        if (fin >= 0) break;
+        if (fin >= 0 && TO < 0 && !until) break; // (a stage or phase finish plays its block out: a search can go on from it, block for block)
       }
       if (dead) { if (process.env.DEBUG && step >= +(process.env.DEBUG)) appendFileSync(LOG, `  step ${step} fell: move ${mi} at ${s.p.origin.map(Math.round)} v ${s.p.vel.map(Math.round)}\n`); continue; }
       const o = s.p.origin, w = where(o, n.j), vv = s.p.vel, sp = Math.hypot(vv[0], vv[1], vv[2]), energy = o[2] + sp ** 2 / (2 * g);
       const cell = [w.j, ...o.map(c => Math.round(c / 128)), Math.round(sp / 200), Math.round(vv[2] / 200)].join(); // where and how fast (slow starts in one room still spread)
       const [A, T] = band[w.j], onFace = s.p.tick - s.p.touchTick <= 1 || s.p.onGround;
+      if (fin < 0 && w.d > +(process.env.MAXD ?? 8000)) continue; // far off the guide: lost (a teleport somewhere else, e.g. into a bonus), unless it just finished (through a teleport)
       if (!free[w.j] && w.dz < -400 && sp < 800 && (s.p.onGround || overFloor(o))) continue; // walking (or hopping) along a floor far below the line: it counts as progress but is no line, and there's no way back up (fast states skimming a ramp top are left to the score)
-      if (df && free[w.j]) { const dd = dist(o); if (!Number.isFinite(dd)) continue; w.prog = cum[cutAt] + d0 - dd; }
+      if (df && free[w.j]) { const dd = dist(o); if (!Number.isFinite(dd)) { if (fin < 0) continue; } else w.prog = cum[cutAt] + d0 - dd; } // (a finish through a teleport lands outside the field)
       const cap = process.env.CAP?.split(',').map(Number);
       let pen = cap && o.every((c, k) => c >= cap[k] && c <= cap[k + 3]) ? 2 * Math.max(0, sp - cap[6]) : 0;
       pen += df && free[w.j] ? 0 : Math.max(0, Math.abs(w.side) - (free[w.j] ? +(process.env.RT ?? 800) : R));
@@ -212,10 +224,11 @@ it('beam', async () => {
   const run = encode(ms);
   // replay it as the game does, from a fresh start (a search from a recording's snapshot has no such replay: it only shows the line is findable)
   let time = -1;
-  if (!process.env.DEMO) {
+  if (!process.env.DEMO && !process.env.STAGE) {
     const r = new Session(def, { ...DEFAULTS, tickrate: tick }), bot = replay(run, tick, makeBot(def.route ?? [], r.world, r.s, undefined, !!def.routeOnSurface, { flags: def.routeFlags, hazard: r.hazard, bisect: def.routeCorners }));
     for (let i = 0; i < (ms.length + 2) * per && time < 0; i++) { r.step(bot(r.p)); for (const e of r.events.splice(0)) if (e.type === 'finish' || (e.type === 'stage' && e.index === TO)) time = r.run.time; }
   }
   appendFileSync(LOG, `finished ${done.time.toFixed(3)} (replay ${time.toFixed(3)}), ${ms.length} blocks, ${run.length} chars, ${((Date.now() - t0) / 1000).toFixed(0)}s\n`);
   writeFileSync(`scratch/${tag}.run.json`, JSON.stringify({ run, time: done.time, ...(TO >= 0 && { stage: TO }) }));
+  writeFileSync(`scratch/${tag}.done.json`, JSON.stringify({ snap: done.node.snap, moves: ms, j: done.node.j, prog: done.node.prog })); // the state it finished in: START= (with RESEAT=1) searches on from there
 }, 14_400_000);

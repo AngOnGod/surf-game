@@ -1,9 +1,9 @@
 // Map format, brush builders and the game session (triggers, timer, practice checkpoints).
 import {
-  type Brush, type Cmd, type Player, type Settings, type Vec, DEG, HULL_MIN, HULL_STAND, add, categorizePosition, ctx,
-  hullMax, hullPlanes, makeBrush, newPlayer, playerMove, scale, teleport, trace,
+  type Brush, type Cmd, type Player, type Settings, type Tris, type Vec, type World, DEG, HULL_MIN, HULL_STAND, add,
+  categorizePosition, ctx, hullMax, hullPlanes, makeBrush, newPlayer, playerMove, scale, teleport, trace,
 } from './physics';
-import type { Bsp, Filter, Shape, Terrain } from './bsp';
+import type { Bsp, Filter, Props, Shape, Terrain } from './bsp';
 import { cos, sin } from './fmath';
 
 export interface Spawn { pos: Vec; yaw: number; pitch?: number }
@@ -27,12 +27,15 @@ export interface MapDef {
   routeOnSurface?: boolean; // route points are guides ([x, y, zHint, h?]): turned into a riding line on the faces at load (see ridingLine)
   routeFlags?: number[]; // per route point, for the autopilot (1: a launch must pass through this point, see makeBot)
   routeCorners?: boolean; // autopilot: a waypoint at a corner is passed at the bisector (tight, turning routes)
-  world?: Brush[]; // prebuilt collision brushes (set by the loader)
+  world?: World; // prebuilt collision brushes (set by the loader)
   bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string } }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): players pick their own copy (where to get it, the exact file the zones and route fit)
   credit?: { by: string; source: string; license?: [string, string] }; // third-party maps: author, where it's from, licence name + link
   trail?: { zone: Box; width: [number, number]; life: number; height: number }; // a sprite trail handed out in zone (Source env_spritetrail parented to you)
   namers?: (Box & { shape?: Shape; name: string; filter?: Filter })[]; // zones that set the player's targetname (for filtered triggers)
-  terrain?: Terrain; // an imported map's displacements (terrain, cave walls): drawn only
+  terrain?: Terrain; // an imported map's displacements (terrain, cave walls), drawn
+  tris?: Tris; // ...and those solid to players, as collision triangles
+  props?: Props; // an imported map's static props, drawn (the solid ones' hulls are among its brushes)
+  settings?: Partial<Settings>; // movement settings the map sets itself (an imported map's spawn commands): they apply on it
 }
 
 export const box = (pos: Vec, size: Vec, o: { yaw?: number; color?: number } = {}): BrushDef => ({ type: 'box', pos, size, ...o });
@@ -118,6 +121,9 @@ export function course(rows: Row[], at: Vec): Course {
 const rotZ = (v: Vec, a: number): Vec => { const c = cos(a * DEG), s = sin(a * DEG); return [v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]]; };
 const rotY = (v: Vec, a: number): Vec => { const c = cos(a * DEG), s = sin(a * DEG); return [v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c]; };
 
+/** The collision world: the brushes, and the displacement triangles if the map has any. */
+export const buildWorld = (def: MapDef): World => Object.assign(def.brushes.map(buildBrush), { tris: def.tris });
+
 export function buildBrush(d: BrushDef): Brush {
   if (d.type === 'planes') return { ...makeBrush(d.planes.map(([x, y, z, w]) => ({ n: [x, y, z], d: w })), d.color ?? 0x8a8f98, d.faceColors), glass: d.glass, nonsolid: d.nonsolid };
   let pts: Vec[];
@@ -153,7 +159,7 @@ interface Saved { origin: Vec; vel: Vec; yaw: number; pitch: number; ducked: boo
 export interface Snapshot { p: Player; run: Timer; stage: Timer & { index: number }; section: number; trail: boolean; name: string; inPush: boolean[] }
 
 export class Session {
-  world: Brush[];
+  world: World;
   p: Player;
   prev: { origin: Vec; view: number };
   run = freshTimer();
@@ -170,8 +176,10 @@ export class Session {
   readonly start?: Box;
   readonly end?: Box;
 
-  constructor(public def: MapDef, public s: Settings) {
-    this.world = def.world ?? def.brushes.map(buildBrush);
+  s: Settings;
+  constructor(public def: MapDef, s: Settings) {
+    this.s = def.settings && Object.keys(def.settings).length ? Object.assign(Object.create(s) as Settings, def.settings) : s; // (the rest still follows s)
+    this.world = def.world ?? buildWorld(def);
     const solid = <T extends { shape?: Shape }>(v: T) => (v.shape ? { ...v, solids: v.shape.map(pl => makeBrush(pl.map(([x, y, z, w]) => ({ n: [x, y, z], d: w })))) } : v);
     this.def = def = { ...def, fails: def.fails?.map(solid), pushes: def.pushes?.map(solid), namers: def.namers?.map(solid) };
     this.start = def.start ?? def.stages?.[0].start;
@@ -273,13 +281,14 @@ export class Session {
     const o = p.origin;
 
     if (def.stages) {
+      const run = this.stage; // a stage's end first: one can end where the next starts (arriving through its exit teleport)
+      if (run.state === 'running') {
+        run.time += dt;
+        if (inside(o, def.stages[run.index].end)) { run.state = 'done'; this.events.push({ type: 'stage', index: run.index, time: run.time, practice: run.practice }); }
+      }
       def.stages.forEach((st, i) => { if (inside(o, st.start)) { this.stage = { index: i, ...freshTimer('ready') }; this.section = i; } });
       const st = def.stages[this.stage.index], t = this.stage;
       if (t.state === 'ready' && !inside(o, st.start)) { t.state = 'running'; t.practice ||= this.assisted; }
-      else if (t.state === 'running') {
-        t.time += dt;
-        if (inside(o, st.end)) { t.state = 'done'; this.events.push({ type: 'stage', index: this.stage.index, time: t.time, practice: t.practice }); }
-      }
     } else {
       def.checkpoints?.forEach((cp, i) => { if (inside(o, cp)) this.section = i + 1; });
     }

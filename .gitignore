@@ -20,3 +20,9 @@ scratch/*.snap.json
 scratch/u3-*.json
 scratch/u3-*.txt
 scratch/u3-*.json.txt
+scratch/*.txt
+scratch/*.done.json
+scratch/cw-*
+scratch/pr-*
+scratch/mesa-flood*
+scratch/mesa-way*

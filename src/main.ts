@@ -56,7 +56,11 @@ const brushMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1, // edges draw on top
   uniforms: { fogColor: { value: HORIZON }, fogNear: { value: FOG_NEAR }, fogFar: { value: FOG_FAR }, alpha: { value: 1 } },
   vertexShader: `attribute vec3 tint; varying vec3 vW, vN, vC; varying float vD;
-    void main() { vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; vN = normal; vC = tint;
+    void main() { mat4 m = modelMatrix;
+      #ifdef USE_INSTANCING
+      m = m * instanceMatrix;
+      #endif
+      vec4 w = m * vec4(position, 1.); vW = w.xyz; vN = mat3(m) * normal; vC = tint;
       vec4 v = viewMatrix * w; vD = -v.z; gl_Position = projectionMatrix * v; }`,
   fragmentShader: `uniform vec3 fogColor; uniform float fogNear, fogFar, alpha; varying vec3 vW, vN, vC; varying float vD;
     float grid(vec2 uv, float s) { vec2 g = abs(fract(uv / s - .5) - .5) / fwidth(uv / s); return 1. - min(min(g.x, g.y), 1.); }
@@ -115,6 +119,16 @@ function buildScene(s: Session) {
     tg.setAttribute('normal', new THREE.BufferAttribute(t.nrm, 3));
     tg.setAttribute('tint', new THREE.BufferAttribute(t.col, 3));
     worldGroup.add(new THREE.Mesh(tg, brushMat));
+  }
+  for (const p of s.def.props ?? []) for (const [part, mat] of [[p, brushMat], [p.glass, glassMat]] as const) { // static props: each model once, a copy per placement
+    if (!part.pos.length) continue;
+    const g = new THREE.BufferGeometry(), m = new THREE.InstancedMesh(g, mat, p.at.length), at = new THREE.Matrix4();
+    g.setAttribute('position', new THREE.BufferAttribute(part.pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(part.nrm, 3));
+    g.setAttribute('tint', new THREE.BufferAttribute(part.col, 3));
+    p.at.forEach((a, i) => m.setMatrixAt(i, at.fromArray(a)));
+    m.frustumCulled = false; // (the copies are spread over the map)
+    worldGroup.add(m);
   }
   const d = s.def;
   if (!d.stages) { if (s.start) worldGroup.add(zoneMesh(s.start, 0x22c55e, 0.12)); if (s.end) worldGroup.add(zoneMesh(s.end, 0xef4444, 0.12)); }
@@ -303,7 +317,8 @@ const sectionName = (i: number) => session.def.stages?.[i]?.name ?? (i > 0 ? ses
 function onEvent(e: GameEvent) {
   const id = session.def.id, pb: PB = store.get(pbKey(id), {});
   if ((e.type === 'finish' || e.type === 'stage') && rec) { // finished cleanly since the recording started: keep it
-    demo = { map: id, tickrate: settings.tickrate, settings: Object.fromEntries(MOVEMENT.map(k => [k, settings[k]])) as Partial<Settings>, stage: e.type === 'stage' ? e.index : undefined, time: e.time, practice: e.practice, ...rec };
+    // (the settings as played: with the map's own, if it sets any)
+    demo = { map: id, tickrate: settings.tickrate, settings: Object.fromEntries(MOVEMENT.map(k => [k, session.s[k]])) as Partial<Settings>, stage: e.type === 'stage' ? e.index : undefined, time: e.time, practice: e.practice, ...rec };
     rec = null;
     flash('Run recorded: E saves it as a file', 4000);
   }
