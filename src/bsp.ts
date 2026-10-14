@@ -6,7 +6,7 @@ import { type Box, type BrushDef, type MapDef, type Spawn, buildWorld, ridingLin
 import { DEG, type Settings, type Tris, type Vec, makeTris } from './physics';
 import { cos, sin } from './fmath';
 import { type Mesh, type Model, loadModel, readPak, staticProps } from './mdl';
-import { type Look, type Mat, type Part, material, sky } from './look';
+import { type Look, type Mat, type Part, material, readVmt, sky } from './look';
 
 const SOLID = 0x1 | 0x2 | 0x8 | 0x4000 | 0x10000; // solid | window | grate | moveable | playerclip  (MASK_PLAYERSOLID)
 const HIDDEN = 0x2 | 0x4 | 0x40 | 0x80 | 0x100 | 0x200; // sky2d | sky | trigger | nodraw | hint | skip
@@ -33,13 +33,13 @@ export interface Bsp {
   look?: Look; // the map's own look, when asked for
 }
 /** Static props to draw: each model once (its own space), with a placement matrix per copy (4x4, column-major). */
-export type Props = (Mesh & { glass: Mesh; at: number[][] })[]; // glass: the see-through part
+export type Props = (Mesh & { glass: Mesh; at: number[][]; parts?: { mat: Mat; pos: Float32Array; uv: Float32Array; index: Uint32Array }[] })[]; // glass: the see-through part; parts: drawn with their own textures (signs)
 /** Displacements (terrain, cave walls) as a triangle soup to draw: positions, normals, colours. */
 export interface Terrain { pos: Float32Array; nrm: Float32Array; col: Float32Array }
 
 const vec = (s = '0 0 0') => s.trim().split(/\s+/).map(Number) as Vec;
 
-export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean } = {}): Bsp {
+export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean; textured?: RegExp } = {}): Bsp {
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   if (dv.getUint32(0, true) !== 0x50534256) throw new Error('not a VBSP file');
   const version = dv.getInt32(4, true);
@@ -203,14 +203,18 @@ export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean } = {}): Bsp {
   for (const [pi, p] of (GL.len ? staticProps(u8, GL.ofs) : []).entries()) {
     const key = `${p.model.toLowerCase()}#${p.skin}`;
     if (!mdls.has(key)) {
-      const m = loadModel(pak, p.model, p.skin, !!look);
+      const own = !look && opts.textured?.test(p.model) && ((path: string) => readVmt(pak, path)?.shader === 'unlitgeneric'); // their glowing faces: arrows, words
+      const m = loadModel(pak, p.model, p.skin, look ? true : own);
       mdls.set(key, m && { ...m, planes: m.hulls.map(hullOf) });
     }
     const m = mdls.get(key);
     if (!m) continue;
     const [ap, ay, ar] = p.angles.map(a => a * DEG), sp = sin(ap), cp = cos(ap), sy = sin(ay), cy = cos(ay), sr = sin(ar), cr = cos(ar), k = p.scale, o = p.origin;
     const R = [[cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy], [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy], [-sp, sr * cp, cr * cp]]; // Source's AngleMatrix
-    if (!placed.has(key)) { placed.set(key, props.length); props.push({ pos: m.pos, nrm: m.nrm, col: m.col, glass: m.glass, at: [] }); }
+    if (!placed.has(key)) {
+      placed.set(key, props.length);
+      props.push({ pos: m.pos, nrm: m.nrm, col: m.col, glass: m.glass, at: [], ...(!look && m.meshes.length && { parts: m.meshes.map(x => ({ mat: material(pak, x.mat, [1, 1, 1], 0), pos: x.pos, uv: x.uv, index: x.index })) }) });
+    }
     props[placed.get(key)!].at.push([R[0][0] * k, R[1][0] * k, R[2][0] * k, 0, R[0][1] * k, R[1][1] * k, R[2][1] * k, 0, R[0][2] * k, R[1][2] * k, R[2][2] * k, 0, o[0], o[1], o[2], 1]);
     look?.prop(m.meshes, R.map(r => r.map(x => x * k)), o, pak.get(`sp_${pi}.vhv`));
     if (p.solid !== 6) continue; // SOLID_VPHYSICS; 0 is not solid (bounding-box props are rare enough to leave out)
@@ -346,7 +350,7 @@ export async function resolveMap(def: MapDef, read: (url: string) => Promise<Arr
   if (!r.ok) throw new Error(`${u} not found`);
   return r.arrayBuffer();
 })): Promise<MapDef> {
-  const b = def.bsp && parseBsp(await unpack(await read(def.bsp.url)), { look: def.bsp.look }), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain, tris: b.tris, props: b.props, look: b.look, settings: { ...b.settings, ...def.settings } } : def;
+  const b = def.bsp && parseBsp(await unpack(await read(def.bsp.url)), { look: def.bsp.look, textured: def.bsp.textured }), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain, tris: b.tris, props: b.props, look: b.look, settings: { ...b.settings, ...def.settings } } : def;
   if (!full.routeOnSurface || !full.route) return full;
   const world = buildWorld(full);
   return { ...full, world, route: ridingLine(world, full.route) };

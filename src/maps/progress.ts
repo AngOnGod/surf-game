@@ -24,6 +24,7 @@ const map: MapDef = {
   brushes: [],
   bsp: {
     url: 'maps/surf_progress_fix.bsp.gz',
+    textured: /\/signs\//, // its signs show their arrows and titles (in their textures)
     apply: b => {
       const zone = (name: string): Box => { const t = b.triggers.find(t => t.e.targetname === name)!; return hull({ min: t.min, max: t.max }); };
       const dest = (name: string): Spawn => { const e = b.entities.find(e => e.classname === 'info_teleport_destination' && e.targetname === name)!; return { pos: e.origin.split(' ').map(Number) as Vec, yaw: +e.angles.split(' ')[1] }; };

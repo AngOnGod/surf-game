@@ -107,9 +107,15 @@ const texOf = (img: Image | null, repeat = true) => {
   looks.push(t);
   return t;
 };
-const LOOK_VS = `attribute vec2 tuv, lm; attribute vec3 light; varying vec2 vUv, vLm; varying vec3 vLight;
-  void main() { vUv = tuv; vLm = lm; vLight = light; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
-const LOOK_FS = `uniform sampler2D map, lightmap; uniform vec3 tint; uniform float alpha; varying vec2 vUv, vLm; varying vec3 vLight;
+const LOOK_VS = `attribute vec2 tuv, lm; attribute vec3 light; varying vec2 vUv, vLm; varying vec3 vLight; varying float vD;
+  void main() {
+    vUv = tuv; vLm = lm; vLight = light; mat4 m = modelMatrix;
+    #ifdef USE_INSTANCING
+    m = m * instanceMatrix;
+    #endif
+    vec4 v = viewMatrix * m * vec4(position, 1.); vD = -v.z; gl_Position = projectionMatrix * v;
+  }`;
+const LOOK_FS = `uniform sampler2D map, lightmap; uniform vec3 tint, fogColor; uniform float alpha, fogNear, fogFar; varying vec2 vUv, vLm; varying vec3 vLight; varying float vD;
   void main() {
     vec4 c = texture2D(map, vUv) * vec4(tint, alpha);
     #if LIT == 1
@@ -120,21 +126,26 @@ const LOOK_FS = `uniform sampler2D map, lightmap; uniform vec3 tint; uniform flo
     #ifdef CUTOUT
     if (c.a < .5) discard;
     #endif
+    #ifdef FOG
+    c.rgb = mix(c.rgb, fogColor, smoothstep(fogNear, fogFar, vD));
+    #endif
     gl_FragColor = c;
   }`;
+/** A material as Source draws it; fog: faded like the game's own look (a sign among flat colours). */
+function lookMat(m: Look['mats'][number], lightmap: THREE.Texture | null, fog = false) {
+  const tint = new THREE.Vector3(...m.tint), see = m.blend === 1 || m.blend === 2;
+  if (m.pulse.length) pulsing.push({ tint, m });
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: LOOK_VS, fragmentShader: LOOK_FS, defines: { LIT: m.lit, ...(m.blend === 3 && { CUTOUT: 1 }), ...(fog && { FOG: 1 }) },
+    uniforms: { map: { value: texOf(m.tex) }, lightmap: { value: lightmap }, tint: { value: tint }, alpha: { value: m.alpha }, fogColor: { value: HORIZON }, fogNear: { value: FOG_NEAR }, fogFar: { value: FOG_FAR } },
+    side: m.cull ? THREE.FrontSide : THREE.DoubleSide, transparent: see, depthWrite: !see, blending: m.blend === 2 ? THREE.AdditiveBlending : THREE.NormalBlending,
+  });
+  looks.push(mat);
+  return mat;
+}
 function lookScene(look: Look, g: THREE.Group) {
   const lightmap = look.lightmap && texOf(look.lightmap, false);
-  const mats = look.mats.map(m => {
-    const tint = new THREE.Vector3(...m.tint), see = m.blend === 1 || m.blend === 2;
-    if (m.pulse.length) pulsing.push({ tint, m });
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: LOOK_VS, fragmentShader: LOOK_FS, defines: { LIT: m.lit, ...(m.blend === 3 && { CUTOUT: 1 }) },
-      uniforms: { map: { value: texOf(m.tex) }, lightmap: { value: lightmap }, tint: { value: tint }, alpha: { value: m.alpha } },
-      side: m.cull ? THREE.FrontSide : THREE.DoubleSide, transparent: see, depthWrite: !see, blending: m.blend === 2 ? THREE.AdditiveBlending : THREE.NormalBlending,
-    });
-    looks.push(mat);
-    return mat;
-  });
+  const mats = look.mats.map(m => lookMat(m, lightmap));
   for (const p of look.parts) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(p.pos, 3));
@@ -224,6 +235,15 @@ function flatScene(s: Session) {
     g.setAttribute('tint', new THREE.BufferAttribute(part.col, 3));
     p.at.forEach((a, i) => m.setMatrixAt(i, at.fromArray(a)));
     m.frustumCulled = false; // (the copies are spread over the map)
+    worldGroup.add(m);
+  }
+  for (const p of s.def.props ?? []) for (const part of p.parts ?? []) { // their glowing faces in their own textures (signs: arrows, words)
+    const g = new THREE.BufferGeometry(), m = new THREE.InstancedMesh(g, lookMat(part.mat, null, true), p.at.length), at = new THREE.Matrix4();
+    g.setAttribute('position', new THREE.BufferAttribute(part.pos, 3));
+    g.setAttribute('tuv', new THREE.BufferAttribute(part.uv, 2));
+    g.setIndex(new THREE.BufferAttribute(part.index, 1));
+    p.at.forEach((a, i) => m.setMatrixAt(i, at.fromArray(a)));
+    m.frustumCulled = false;
     worldGroup.add(m);
   }
 }

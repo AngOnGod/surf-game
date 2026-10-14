@@ -578,6 +578,11 @@ describe.skipIf(!existsSync(PROGRESS))('Source .bsp import (surf_progress, gzipp
     for (let i = 0; i < 64; i++) s.step(NO_CMD);
     expect([s.p.onGround, Math.round(s.p.origin[0]), Math.round(s.p.origin[1])]).toEqual([true, 11968, 10016]);
   }, 60_000);
+  it('its signs show their arrows and titles: their glowing faces are drawn in their own textures', async () => {
+    const signs = (await load()).props!.filter(p => p.parts?.length);
+    expect([signs.length, signs.reduce((a, p) => a + p.at.length, 0)]).toEqual([18, 47]); // arrows (19 flicks, 11 turns, 2 bends), section boards
+    expect(signs.every(p => p.parts!.every(q => q.mat.tex && q.mat.lit === 0 && q.index.length))).toBe(true);
+  }, 60_000);
   it('part 3\'s last section is ridden three times: each exit opens part 4 only once you hold the other two letters', async () => {
     const def = await load(), s = new Session(def, S), five = [9408, -13312, -11936];
     const exit = (x: number, y: number) => { // drop into an exit (two tilted slabs: back to its pad first, then on to part 4), then on through whatever it leads to

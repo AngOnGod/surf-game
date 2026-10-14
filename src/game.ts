@@ -29,7 +29,7 @@ export interface MapDef {
   routeFlags?: number[]; // per route point, for the autopilot (1: a launch must pass through this point, see makeBot)
   routeCorners?: boolean; // autopilot: a waypoint at a corner is passed at the bisector (tight, turning routes)
   world?: World; // prebuilt collision brushes (set by the loader)
-  bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string }; look?: boolean }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): players pick their own copy (where to get it, the exact file the zones and route fit); look: drawn with its own materials, lighting and sky
+  bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string }; look?: boolean; textured?: RegExp }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): players pick their own copy (where to get it, the exact file the zones and route fit); look: drawn with its own materials, lighting and sky; textured: props (by model path) whose glowing faces are drawn with their own textures (signs: arrows, words)
   credit?: { by: string; source: string; license?: [string, string] }; // third-party maps: author, where it's from, licence name + link
   trail?: { zone: Box; width: [number, number]; life: number; height: number }; // a sprite trail handed out in zone (Source env_spritetrail parented to you)
   namers?: (Box & { shape?: Shape; name: string; filter?: Filter })[]; // zones that set the player's targetname (for filtered triggers)

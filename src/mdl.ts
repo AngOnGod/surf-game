@@ -67,8 +67,9 @@ function material(pak: Map<string, Uint8Array>, path: string, depth = 0): { rgb:
   return { rgb: [0, 1, 2].map(k => srgb(dv.getFloat32(32 + 4 * k, true))) as Vec, glass };
 }
 
-/** Loads a packed model (MDL + VVD + DX90 VTX, level of detail 0, body 0, the given skin; PHY for its hulls). */
-export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0, look = false): Model | null { // look: also its meshes
+/** Loads a packed model (MDL + VVD + DX90 VTX, level of detail 0, body 0, the given skin; PHY for its hulls). look: also
+ *  its meshes (true: all of them; a test of a material's path: those that pass, left out of the flat triangles). */
+export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0, look: boolean | ((mat: string) => boolean) = false): Model | null {
   const base = name.toLowerCase().replace(/\\/g, '/').replace(/\.mdl$/, ''), mdl = pak.get(base + '.mdl'), vvd = pak.get(base + '.vvd');
   const vtx = pak.get(base + '.dx90.vtx') ?? pak.get(base + '.vtx') ?? pak.get(base + '.dx80.vtx');
   if (!mdl || !vvd || !vtx) return null;
@@ -96,7 +97,8 @@ export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0, 
         const xme = lod + xi(lod + 4) + 9 * k;
         if (n || !drawn) { group += xi(xme); continue; }
         const mm = mb + M.getInt32(mb + 12, true), vbase = M.getInt32(mm + 84, true) / 48;
-        const mme = mm + M.getInt32(mm + 76, true) + 116 * k, voff = M.getInt32(mme + 12, true), mat = matOf(M.getInt32(mme, true)), c = mat.rgb, out = mat.glass ? see : solid;
+        const mme = mm + M.getInt32(mm + 76, true) + 116 * k, voff = M.getInt32(mme + 12, true), mat = matOf(M.getInt32(mme, true)), c = mat.rgb;
+        const path = paths[ref(M.getInt32(mme, true))] ?? '', own = look === true || (!!look && look(path)), out = own && look !== true ? { pos: [], nrm: [], col: [] } : mat.glass ? see : solid;
         const m = { pos: [] as number[], uv: [] as number[], index: [] as number[], light: [] as number[] };
         for (let g = 0; g < xi(xme); g++, group++) {
           const sg = xme + xi(xme + 4) + sgSize * g, nv = xi(sg), vo = sg + xi(sg + 4), ni = xi(sg + 8), io = sg + xi(sg + 12), first = m.pos.length / 3;
@@ -116,7 +118,7 @@ export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0, 
             }
           }
         }
-        if (look) meshes.push({ mat: paths[ref(M.getInt32(mme, true))] ?? '', pos: new Float32Array(m.pos), uv: new Float32Array(m.uv), index: new Uint32Array(m.index), light: new Uint32Array(m.light) });
+        if (own) meshes.push({ mat: path, pos: new Float32Array(m.pos), uv: new Float32Array(m.uv), index: new Uint32Array(m.index), light: new Uint32Array(m.light) });
       }
     }
   }
