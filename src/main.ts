@@ -6,6 +6,8 @@ import { makeBot } from './bot';
 import { type Demo, replay } from './plan';
 import { RUNS } from './runs';
 import { resolveMap } from './bsp';
+import type { Look } from './look';
+import type { Image } from './vtf';
 
 const MAPS = Object.values(import.meta.glob<{ default: MapDef }>('./maps/*.ts', { eager: true }))
   .map(m => m.default).sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
@@ -36,7 +38,8 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(74, 1, 8, 400000);
 const HORIZON = new THREE.Color(0xc4d6e6), FOG_NEAR = 12000, FOG_FAR = 110000;
-scene.fog = new THREE.Fog(HORIZON, FOG_NEAR, FOG_FAR);
+const fog = new THREE.Fog(HORIZON, FOG_NEAR, FOG_FAR);
+scene.fog = fog;
 
 const sky = new THREE.Mesh(new THREE.SphereGeometry(1000, 32, 16), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
@@ -88,10 +91,103 @@ function zoneMesh(b: Box, color: number, opacity: number) {
   return grp;
 }
 
+// a map's own look (MapDef.look): its textures and tints, lightmaps or prop vertex lighting, see-through and glowing
+// materials, colour pulses and sky, as Source draws them (gamma space: texture x tint x light; no fog)
+const skyBox = new THREE.Group(), pulsing: { tint: THREE.Vector3; m: Look['mats'][number] }[] = [], looks: { dispose(): void }[] = [];
+skyBox.renderOrder = -1;
+scene.add(skyBox);
+const texOf = (img: Image | null, repeat = true) => {
+  const t = new THREE.DataTexture(img?.rgba ?? new Uint8Array([255, 255, 255, 255]), img?.w ?? 1, img?.h ?? 1);
+  t.wrapS = t.wrapT = repeat ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = repeat ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+  t.generateMipmaps = repeat;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.needsUpdate = true;
+  looks.push(t);
+  return t;
+};
+const LOOK_VS = `attribute vec2 tuv, lm; attribute vec3 light; varying vec2 vUv, vLm; varying vec3 vLight;
+  void main() { vUv = tuv; vLm = lm; vLight = light; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
+const LOOK_FS = `uniform sampler2D map, lightmap; uniform vec3 tint; uniform float alpha; varying vec2 vUv, vLm; varying vec3 vLight;
+  void main() {
+    vec4 c = texture2D(map, vUv) * vec4(tint, alpha);
+    #if LIT == 1
+    c.rgb *= texture2D(lightmap, vLm).rgb * 2.;
+    #elif LIT == 2
+    c.rgb *= vLight;
+    #endif
+    #ifdef CUTOUT
+    if (c.a < .5) discard;
+    #endif
+    gl_FragColor = c;
+  }`;
+function lookScene(look: Look, g: THREE.Group) {
+  const lightmap = look.lightmap && texOf(look.lightmap, false);
+  const mats = look.mats.map(m => {
+    const tint = new THREE.Vector3(...m.tint), see = m.blend === 1 || m.blend === 2;
+    if (m.pulse.length) pulsing.push({ tint, m });
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: LOOK_VS, fragmentShader: LOOK_FS, defines: { LIT: m.lit, ...(m.blend === 3 && { CUTOUT: 1 }) },
+      uniforms: { map: { value: texOf(m.tex) }, lightmap: { value: lightmap }, tint: { value: tint }, alpha: { value: m.alpha } },
+      side: m.cull ? THREE.FrontSide : THREE.DoubleSide, transparent: see, depthWrite: !see, blending: m.blend === 2 ? THREE.AdditiveBlending : THREE.NormalBlending,
+    });
+    looks.push(mat);
+    return mat;
+  });
+  for (const p of look.parts) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(p.pos, 3));
+    geo.setAttribute('tuv', new THREE.BufferAttribute(p.uv, 2));
+    if (p.lm) geo.setAttribute('lm', new THREE.BufferAttribute(p.lm, 2));
+    if (p.light) geo.setAttribute('light', new THREE.BufferAttribute(p.light, 3));
+    geo.setIndex(new THREE.BufferAttribute(p.index, 1));
+    const mesh = new THREE.Mesh(geo, mats[p.mat]);
+    if (mesh.material.transparent) mesh.renderOrder = look.mats[p.mat].blend; // see-through, then glowing
+    g.add(mesh);
+  }
+  // the sky: a cube of its six faces around the eye (Source's layout: rt +x, bk +y, lf -x, ft -y, up, dn)
+  const W = 1000, at: ((s: number, t: number) => Vec)[] = [(s, t) => [W, -s * W, t * W], (s, t) => [s * W, W, t * W], (s, t) => [-W, s * W, t * W], (s, t) => [-s * W, -W, t * W], (s, t) => [-t * W, -s * W, W], (s, t) => [t * W, -s * W, -W]];
+  look.sky?.forEach((img, i) => {
+    const geo = new THREE.BufferGeometry(), c = [[-1, 1], [-1, -1], [1, -1], [1, 1]];
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(c.flatMap(([s, t]) => at[i](s, t)), 3));
+    geo.setAttribute('tuv', new THREE.Float32BufferAttribute(c.flatMap(([s, t]) => [(s + 1) / 2, (1 - t) / 2]), 2));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    const mat = new THREE.ShaderMaterial({ vertexShader: LOOK_VS, fragmentShader: LOOK_FS, defines: { LIT: 0 }, uniforms: { map: { value: texOf(img, false) }, tint: { value: new THREE.Vector3(1, 1, 1) }, alpha: { value: 1 } }, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = -1;
+    looks.push(mat);
+    skyBox.add(mesh);
+  });
+}
+
 function buildScene(s: Session) {
   worldGroup.traverse(o => { if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) o.geometry.dispose(); });
+  skyBox.traverse(o => { if (o instanceof THREE.Mesh) o.geometry.dispose(); });
+  skyBox.clear();
+  looks.splice(0).forEach(r => r.dispose());
+  pulsing.length = 0;
   scene.remove(worldGroup);
   worldGroup = new THREE.Group();
+  const look = s.def.look;
+  scene.fog = look ? null : fog;
+  sky.visible = !look?.sky;
+  if (look) lookScene(look, worldGroup);
+  else flatScene(s);
+  const d = s.def;
+  if (!d.stages) { if (s.start) worldGroup.add(zoneMesh(s.start, 0x22c55e, 0.12)); if (s.end) worldGroup.add(zoneMesh(s.end, 0xef4444, 0.12)); }
+  for (const st of d.stages ?? []) worldGroup.add(zoneMesh(st.start, 0x22c55e, 0.12), zoneMesh(st.end, 0xef4444, 0.12));
+  for (const c of d.checkpoints ?? []) for (const z of [c, ...(c.also ?? [])]) worldGroup.add(zoneMesh(z, 0xeab308, 0.05));
+  for (const p of d.pushes ?? []) worldGroup.add(zoneMesh(p, 0x06b6d4, 0.15));
+  failGroup = new THREE.Group();
+  for (const f of d.fails ?? []) if (f.max[0] - f.min[0] < 1e5) failGroup.add(zoneMesh(f, f.quiet ? 0x06b6d4 : 0xd946ef, 0.04));
+  worldGroup.add(failGroup);
+  scene.add(worldGroup);
+}
+
+/** The game's own look: brush faces in their average colours over a world-space grid, edges, terrain and props. */
+function flatScene(s: Session) {
   const solid = { pos: [] as number[], nrm: [] as number[], tint: [] as number[] }, glass = { pos: [] as number[], nrm: [] as number[], tint: [] as number[] }, edges: number[] = [], col = new THREE.Color();
   for (const b of s.world) {
     const m = b.glass ? glass : solid;
@@ -130,15 +226,6 @@ function buildScene(s: Session) {
     m.frustumCulled = false; // (the copies are spread over the map)
     worldGroup.add(m);
   }
-  const d = s.def;
-  if (!d.stages) { if (s.start) worldGroup.add(zoneMesh(s.start, 0x22c55e, 0.12)); if (s.end) worldGroup.add(zoneMesh(s.end, 0xef4444, 0.12)); }
-  for (const st of d.stages ?? []) worldGroup.add(zoneMesh(st.start, 0x22c55e, 0.12), zoneMesh(st.end, 0xef4444, 0.12));
-  for (const c of d.checkpoints ?? []) for (const z of [c, ...(c.also ?? [])]) worldGroup.add(zoneMesh(z, 0xeab308, 0.05));
-  for (const p of d.pushes ?? []) worldGroup.add(zoneMesh(p, 0x06b6d4, 0.15));
-  failGroup = new THREE.Group();
-  for (const f of d.fails ?? []) if (f.max[0] - f.min[0] < 1e5) failGroup.add(zoneMesh(f, f.quiet ? 0x06b6d4 : 0xd946ef, 0.04));
-  worldGroup.add(failGroup);
-  scene.add(worldGroup);
 }
 
 // ---------------------------------------------------------------- rainbow trail: a map's env_spritetrail (or always on)
@@ -532,6 +619,8 @@ function draw(t: number, now: number) {
   camera.position.set(o[0], o[1], o[2] + eye);
   camera.lookAt(o[0] + f[0], o[1] + f[1], o[2] + eye + f[2]);
   sky.position.copy(camera.position);
+  skyBox.position.copy(camera.position);
+  for (const { tint, m } of pulsing) for (const q of m.pulse) tint.setComponent(q.k, q.min + (q.max - q.min) * (Math.sin((2 * Math.PI * (now / 1000 - q.offset)) / q.period) / 2 + 0.5)); // Source's Sine proxy
   drawTrail(o, now);
   renderer.render(scene, camera);
   for (const e of session.events.splice(0)) onEvent(e); // restart / checkpoint messages

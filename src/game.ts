@@ -4,6 +4,7 @@ import {
   categorizePosition, ctx, hullMax, hullPlanes, makeBrush, newPlayer, playerMove, scale, teleport, trace,
 } from './physics';
 import type { Bsp, Filter, Props, Shape, Terrain } from './bsp';
+import type { Look } from './look';
 import { cos, sin } from './fmath';
 
 export interface Spawn { pos: Vec; yaw: number; pitch?: number }
@@ -28,13 +29,14 @@ export interface MapDef {
   routeFlags?: number[]; // per route point, for the autopilot (1: a launch must pass through this point, see makeBot)
   routeCorners?: boolean; // autopilot: a waypoint at a corner is passed at the bisector (tight, turning routes)
   world?: World; // prebuilt collision brushes (set by the loader)
-  bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string } }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): players pick their own copy (where to get it, the exact file the zones and route fit)
+  bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string }; look?: boolean }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): players pick their own copy (where to get it, the exact file the zones and route fit); look: drawn with its own materials, lighting and sky
   credit?: { by: string; source: string; license?: [string, string] }; // third-party maps: author, where it's from, licence name + link
   trail?: { zone: Box; width: [number, number]; life: number; height: number }; // a sprite trail handed out in zone (Source env_spritetrail parented to you)
   namers?: (Box & { shape?: Shape; name: string; filter?: Filter })[]; // zones that set the player's targetname (for filtered triggers)
   terrain?: Terrain; // an imported map's displacements (terrain, cave walls), drawn
   tris?: Tris; // ...and those solid to players, as collision triangles
   props?: Props; // an imported map's static props, drawn (the solid ones' hulls are among its brushes)
+  look?: Look; // an imported map's own look (bsp.look): drawn in place of the flat colours
   settings?: Partial<Settings>; // movement settings the map sets itself (an imported map's spawn commands): they apply on it
 }
 

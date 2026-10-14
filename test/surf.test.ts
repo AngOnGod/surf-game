@@ -555,6 +555,17 @@ describe.skipIf(!existsSync(CYBERWAVE))('Source .bsp import (surf_cyberwave, gzi
     expect(s.p.origin.every((v, k) => v >= def.stages![0].start.min[k] && v <= def.stages![0].start.max[k])).toBe(true);
     expect(trace(s.world, [11136, -11200, 8704], [11136, -9344, 8704], HULL_MIN, HULL_STAND).fraction).toBeLessThan(1);
   }, 60_000);
+  it('drawn with its own look: neon tints, textures, lightmaps, props lit by their baked lighting, its sky', async () => {
+    const L = (await load()).look!;
+    const glow = L.mats.filter(m => m.lit === 0 && !m.tex && !m.pulse.length).map(m => m.tint.map(c => Math.round(c * 255)).join(' '));
+    expect(glow).toEqual(expect.arrayContaining(['20 114 255', '249 62 62', '234 37 234', '56 255 238', '249 125 42', '252 241 40'])); // its six neon colours ($color, $color2)
+    expect(L.mats.filter(m => m.tex).length).toBeGreaterThan(20);
+    expect(L.sky!.map(s => `${s.w}x${s.h}`)).toEqual(Array(6).fill('1024x1024'));
+    expect(L.lightmap!.w * L.lightmap!.h).toBeGreaterThan(0);
+    const lit = L.parts.filter(p => p.light), unlit = Math.fround(0.9); // every prop vertex found its baked colour (0.9: none)
+    expect(lit.length).toBeGreaterThan(5);
+    expect(lit.every(p => p.light!.every((v, i) => i % 3 || v !== unlit || p.light![i + 1] !== unlit))).toBe(true);
+  }, 60_000);
 });
 
 const PROGRESS = 'public/maps/surf_progress_fix.bsp.gz';

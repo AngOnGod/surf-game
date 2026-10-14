@@ -45,7 +45,10 @@ export function staticProps(u8: Uint8Array, ofs: number): Prop[] {
 
 /** A model in its own space: triangles to draw (positions, normals, colours) and convex collision hulls. */
 export interface Mesh { pos: Float32Array; nrm: Float32Array; col: Float32Array }
-export interface Model extends Mesh { glass: Mesh; hulls: { pts: Vec[]; tris: number[] }[]; min: Vec; max: Vec } // glass: its see-through triangles
+/** One material's triangles over the hardware vertices (VTX strip-group order, which static prop lighting files follow):
+ *  `light` per vertex: (strip group << 16) | its index there, the strip group counted over LOD 0 of every body. */
+export interface ModelMesh { mat: string; pos: Float32Array; uv: Float32Array; index: Uint32Array; light: Uint32Array }
+export interface Model extends Mesh { glass: Mesh; hulls: { pts: Vec[]; tris: number[] }[]; min: Vec; max: Vec; meshes: ModelMesh[] } // glass: its see-through triangles
 
 const str = (u8: Uint8Array, o: number) => { let e = o; while (u8[e]) e++; return new TextDecoder('latin1').decode(u8.subarray(o, e)); };
 const srgb = (c: number) => Math.min(1, Math.max(0, c)) ** (1 / 2.2);
@@ -65,7 +68,7 @@ function material(pak: Map<string, Uint8Array>, path: string, depth = 0): { rgb:
 }
 
 /** Loads a packed model (MDL + VVD + DX90 VTX, level of detail 0, body 0, the given skin; PHY for its hulls). */
-export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0): Model | null {
+export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0, look = false): Model | null { // look: also its meshes
   const base = name.toLowerCase().replace(/\\/g, '/').replace(/\.mdl$/, ''), mdl = pak.get(base + '.mdl'), vvd = pak.get(base + '.vvd');
   const vtx = pak.get(base + '.dx90.vtx') ?? pak.get(base + '.vtx') ?? pak.get(base + '.dx80.vtx');
   if (!mdl || !vvd || !vtx) return null;
@@ -75,37 +78,51 @@ export function loadModel(pak: Map<string, Uint8Array>, name: string, skin = 0):
   const dirs = [...Array(mi(212)).keys()].map(k => str(mdl, mi(mi(216) + 4 * k)));
   const tex = [...Array(mi(204)).keys()].map(k => { const t = mi(208) + 64 * k; return str(mdl, t + mi(t)); });
   const mats = tex.map(t => dirs.map(d => material(pak, d + t)).find(c => c) ?? null);
-  const nref = mi(220), fam = Math.min(Math.max(0, skin), Math.max(0, mi(224) - 1));
-  const matOf = (m: number) => mats[M.getInt16(mi(228) + 2 * (fam * nref + m), true)] ?? { rgb: [0.54, 0.56, 0.6] as Vec, glass: false };
+  const paths = tex.map(t => dirs.map(d => d + t).find(p => pak.has(`materials/${p}.vmt`.replace(/\\/g, '/').replace(/\/+/g, '/').toLowerCase())) ?? (dirs[0] ?? '') + t);
+  const nref = mi(220), fam = Math.min(Math.max(0, skin), Math.max(0, mi(224) - 1)), ref = (m: number) => M.getInt16(mi(228) + 2 * (fam * nref + m), true);
+  const matOf = (m: number) => mats[ref(m)] ?? { rgb: [0.54, 0.56, 0.6] as Vec, glass: false };
   // vertices (VVD, level 0: fixups rebuild its order)
   const vstart = V.getInt32(56, true), nfix = V.getInt32(48, true), order: number[] = [];
   if (nfix) for (let k = 0, f = V.getInt32(52, true); k < nfix; k++) { const src = V.getInt32(f + 12 * k + 4, true), cnt = V.getInt32(f + 12 * k + 8, true); for (let q = 0; q < cnt; q++) order.push(src + q); }
   const vert = (i: number) => vstart + 48 * (nfix ? order[i] : i);
-  const solid = { pos: [] as number[], nrm: [] as number[], col: [] as number[] }, see = { pos: [] as number[], nrm: [] as number[], col: [] as number[] };
+  const solid = { pos: [] as number[], nrm: [] as number[], col: [] as number[] }, see = { pos: [] as number[], nrm: [] as number[], col: [] as number[] }, meshes: ModelMesh[] = [];
   const sgSize = ver >= 49 ? 33 : 25;
-  for (let b = 0; b < Math.min(xi(28), mi(232)); b++) {
-    const xb = xi(32) + 8 * b, mb = mi(236) + 16 * b;
-    if (xi(xb) < 1 || M.getInt32(mb + 4, true) < 1) continue;
-    const xm = xb + xi(xb + 4), mm = mb + M.getInt32(mb + 12, true); // the body part's first model (body 0)
-    const lod = xm + xi(xm + 4), vbase = M.getInt32(mm + 84, true) / 48;
-    for (let k = 0; k < xi(lod); k++) {
-      const xme = lod + xi(lod + 4) + 9 * k, mme = mm + M.getInt32(mm + 76, true) + 116 * k, voff = M.getInt32(mme + 12, true), mat = matOf(M.getInt32(mme, true)), c = mat.rgb, out = mat.glass ? see : solid;
-      for (let g = 0; g < xi(xme); g++) {
-        const sg = xme + xi(xme + 4) + sgSize * g, nv = xi(sg), vo = sg + xi(sg + 4), ni = xi(sg + 8), io = sg + xi(sg + 12);
-        for (let t = 0; t + 2 < ni; t += 3) {
-          const tri = [0, 2, 1].map(q => X.getUint16(io + 2 * (t + q), true)); // (Source winds them clockwise)
-          if (tri.some(i => i >= nv)) continue;
-          for (const i of tri) {
+  let group = 0; // strip groups so far (LOD 0, every body)
+  for (let b = 0; b < xi(28); b++) {
+    const xb = xi(32) + 8 * b, mb = mi(236) + 16 * b, drawn = b < mi(232) && M.getInt32(mb + 4, true) > 0;
+    for (let n = 0; n < xi(xb); n++) {
+      const xm = xb + xi(xb + 4) + 8 * n, lod = xm + xi(xm + 4); // only the body part's first model (body 0) is drawn
+      for (let k = 0; k < xi(lod); k++) {
+        const xme = lod + xi(lod + 4) + 9 * k;
+        if (n || !drawn) { group += xi(xme); continue; }
+        const mm = mb + M.getInt32(mb + 12, true), vbase = M.getInt32(mm + 84, true) / 48;
+        const mme = mm + M.getInt32(mm + 76, true) + 116 * k, voff = M.getInt32(mme + 12, true), mat = matOf(M.getInt32(mme, true)), c = mat.rgb, out = mat.glass ? see : solid;
+        const m = { pos: [] as number[], uv: [] as number[], index: [] as number[], light: [] as number[] };
+        for (let g = 0; g < xi(xme); g++, group++) {
+          const sg = xme + xi(xme + 4) + sgSize * g, nv = xi(sg), vo = sg + xi(sg + 4), ni = xi(sg + 8), io = sg + xi(sg + 12), first = m.pos.length / 3;
+          for (let i = 0; i < nv; i++) {
             const v = vert(vbase + voff + X.getUint16(vo + 9 * i + 4, true));
-            for (let a = 0; a < 3; a++) { out.pos.push(V.getFloat32(v + 16 + 4 * a, true)); out.nrm.push(V.getFloat32(v + 28 + 4 * a, true)); out.col.push(c[a]); }
+            m.pos.push(V.getFloat32(v + 16, true), V.getFloat32(v + 20, true), V.getFloat32(v + 24, true));
+            m.uv.push(V.getFloat32(v + 40, true), V.getFloat32(v + 44, true));
+            m.light.push(group * 65536 + i);
+          }
+          for (let t = 0; t + 2 < ni; t += 3) {
+            const tri = [0, 2, 1].map(q => X.getUint16(io + 2 * (t + q), true)); // (Source winds them clockwise)
+            if (tri.some(i => i >= nv)) continue;
+            m.index.push(...tri.map(i => first + i));
+            for (const i of tri) {
+              const v = vert(vbase + voff + X.getUint16(vo + 9 * i + 4, true));
+              for (let a = 0; a < 3; a++) { out.pos.push(V.getFloat32(v + 16 + 4 * a, true)); out.nrm.push(V.getFloat32(v + 28 + 4 * a, true)); out.col.push(c[a]); }
+            }
           }
         }
+        if (look) meshes.push({ mat: paths[ref(M.getInt32(mme, true))] ?? '', pos: new Float32Array(m.pos), uv: new Float32Array(m.uv), index: new Uint32Array(m.index), light: new Uint32Array(m.light) });
       }
     }
   }
   const f3 = (o: number): Vec => [M.getFloat32(o, true), M.getFloat32(o + 4, true), M.getFloat32(o + 8, true)];
   const mesh = (m: typeof solid): Mesh => ({ pos: new Float32Array(m.pos), nrm: new Float32Array(m.nrm), col: new Float32Array(m.col) });
-  return { ...mesh(solid), glass: mesh(see), hulls: phyHulls(pak.get(base + '.phy')), min: f3(104), max: f3(116) };
+  return { ...mesh(solid), glass: mesh(see), hulls: phyHulls(pak.get(base + '.phy')), min: f3(104), max: f3(116), meshes };
 }
 
 /** Collision hulls from a PHY file: each solid's IVP compact surface holds convex pieces (ledges, whose triangles index a

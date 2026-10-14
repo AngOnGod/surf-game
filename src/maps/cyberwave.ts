@@ -5,6 +5,7 @@ import type { Vec } from '../physics';
 // (unpacked as it loads: byte for byte the map, which is over the host's 100 MB file limit), shipped unmodified under its
 // CC BY-NC-ND 4.0 licence with credit (CREDITS.md). Two long stages north over a neon city, each with its own timer.
 // The ramps are models (drawn from the map's packed files) over invisible player-clip brushes, which are what you ride.
+// It's drawn with its own look (its textures, neon colours and pulses, baked lighting and sky), not the flat colours.
 // The map sets its own movement settings when it loads (sv_maxvelocity 7500; the rest are the defaults here), and they
 // apply on it. Zones are the map's own trigger volumes (s1_start_zone, s2_start_zone, s2_end_zone), grown by the
 // player's box, as a trigger fires on touch; stage 1 ends just before its exit portal (a teleport to stage 2). Falls
@@ -74,6 +75,7 @@ const map: MapDef = {
   routeOnSurface: true,
   bsp: {
     url: 'maps/surf_cyberwave.bsp.gz',
+    look: true, // drawn as it is: its neon, textures, lighting and sky
     apply: b => {
       const zone = (name: string): Box => { const t = b.triggers.filter(t => t.e.targetname === name); return hull({ min: [0, 1, 2].map(k => Math.min(...t.map(x => x.min[k]))) as Vec, max: [0, 1, 2].map(k => Math.max(...t.map(x => x.max[k]))) as Vec }); };
       const dest = (name: string): Spawn => { const e = b.entities.find(e => e.classname === 'info_teleport_destination' && e.targetname === name)!; return { pos: e.origin.split(' ').map(Number) as Vec, yaw: +e.angles.split(' ')[1] }; };

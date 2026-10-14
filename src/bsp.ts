@@ -6,6 +6,7 @@ import { type Box, type BrushDef, type MapDef, type Spawn, buildWorld, ridingLin
 import { DEG, type Settings, type Tris, type Vec, makeTris } from './physics';
 import { cos, sin } from './fmath';
 import { type Mesh, type Model, loadModel, readPak, staticProps } from './mdl';
+import { type Look, type Mat, type Part, material, sky } from './look';
 
 const SOLID = 0x1 | 0x2 | 0x8 | 0x4000 | 0x10000; // solid | window | grate | moveable | playerclip  (MASK_PLAYERSOLID)
 const HIDDEN = 0x2 | 0x4 | 0x40 | 0x80 | 0x100 | 0x200; // sky2d | sky | trigger | nodraw | hint | skip
@@ -29,6 +30,7 @@ export interface Bsp {
   tris: Tris; // the displacements that are solid to players
   props: Props;
   settings: Partial<Settings>; // movement cvars the map sets itself when it loads
+  look?: Look; // the map's own look, when asked for
 }
 /** Static props to draw: each model once (its own space), with a placement matrix per copy (4x4, column-major). */
 export type Props = (Mesh & { glass: Mesh; at: number[][] })[]; // glass: the see-through part
@@ -37,7 +39,7 @@ export interface Terrain { pos: Float32Array; nrm: Float32Array; col: Float32Arr
 
 const vec = (s = '0 0 0') => s.trim().split(/\s+/).map(Number) as Vec;
 
-export function parseBsp(buf: ArrayBuffer): Bsp {
+export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean } = {}): Bsp {
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   if (dv.getUint32(0, true) !== 0x50534256) throw new Error('not a VBSP file');
   const version = dv.getInt32(4, true);
@@ -197,10 +199,11 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
   // static props: the models packed in the map, drawn; solid ones (vphysics) collide through their convex hulls
   const PK = lump(40), GL = lump(35), pak = readPak(u8, PK.ofs, PK.len), props: Props = [], placed = new Map<string, number>();
   const mdls = new Map<string, (Model & { planes: [number, number, number, number][][] }) | null>(); // per hull: its planes (n, d) in model space
-  for (const p of GL.len ? staticProps(u8, GL.ofs) : []) {
+  const look = opts.look ? lookOf() : undefined;
+  for (const [pi, p] of (GL.len ? staticProps(u8, GL.ofs) : []).entries()) {
     const key = `${p.model.toLowerCase()}#${p.skin}`;
     if (!mdls.has(key)) {
-      const m = loadModel(pak, p.model, p.skin);
+      const m = loadModel(pak, p.model, p.skin, !!look);
       mdls.set(key, m && { ...m, planes: m.hulls.map(hullOf) });
     }
     const m = mdls.get(key);
@@ -209,6 +212,7 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
     const R = [[cp * cy, sr * sp * cy - cr * sy, cr * sp * cy + sr * sy], [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy], [-sp, sr * cp, cr * cp]]; // Source's AngleMatrix
     if (!placed.has(key)) { placed.set(key, props.length); props.push({ pos: m.pos, nrm: m.nrm, col: m.col, glass: m.glass, at: [] }); }
     props[placed.get(key)!].at.push([R[0][0] * k, R[1][0] * k, R[2][0] * k, 0, R[0][1] * k, R[1][1] * k, R[2][1] * k, 0, R[0][2] * k, R[1][2] * k, R[2][2] * k, 0, o[0], o[1], o[2], 1]);
+    look?.prop(m.meshes, R.map(r => r.map(x => x * k)), o, pak.get(`sp_${pi}.vhv`));
     if (p.solid !== 6) continue; // SOLID_VPHYSICS; 0 is not solid (bounding-box props are rare enough to leave out)
     for (const hull of m.planes) { // n' = R n, d' = k d + n'·origin
       const planes = hull.map(([nx, ny, nz, d]): [number, number, number, number] => { const n = R.map(r => r[0] * nx + r[1] * ny + r[2] * nz); return [n[0], n[1], n[2], k * d + n[0] * o[0] + n[1] * o[1] + n[2] * o[2]]; });
@@ -228,7 +232,90 @@ export function parseBsp(buf: ArrayBuffer): Bsp {
     const [cvar, value] = (param ?? '').trim().split(/\s+/);
     if (servers.has(target?.toLowerCase()) && /^command$/i.test(input ?? '') && CVARS[cvar?.toLowerCase()] && Number.isFinite(+value)) Object.assign(settings, CVARS[cvar.toLowerCase()](+value));
   }
-  return { brushes, entities, fails, pushes, triggers, namers, spawn: spawnEnt ? spawnOf(spawnEnt) : { pos: [0, 0, 0], yaw: 0 }, bounds: { min: w.mins, max: w.maxs }, terrain, tris, props, settings };
+  return { brushes, entities, fails, pushes, triggers, namers, spawn: spawnEnt ? spawnOf(spawnEnt) : { pos: [0, 0, 0], yaw: 0 }, bounds: { min: w.mins, max: w.maxs }, terrain, tris, props, settings, look: look?.done() };
+
+  /** The map's own look: its faces by material (texture and lightmap coordinates), a lightmap atlas, its props lit by
+   *  their baked vertex lighting, its sky. */
+  function lookOf() {
+    const mats: Mat[] = [], ids = new Map<string, number>(), acc: { pos: number[]; uv: number[]; lm: number[]; light: number[]; index: number[] }[] = [];
+    const matOf = (path: string, flat: Vec, lit: 0 | 1 | 2) => {
+      const k = `${path.toLowerCase()}|${lit}`;
+      if (!ids.has(k)) { ids.set(k, mats.length); mats.push(material(pak, path, flat, lit)); acc.push({ pos: [], uv: [], lm: [], light: [], index: [] }); }
+      return ids.get(k)!;
+    };
+    // faces of the world and of the brush entities drawn (not triggers, tool volumes or hidden ones), where they stand
+    const LM = lump(8).len ? lump(8) : lump(53), lit: { a: (typeof acc)[number]; at: number; n: number; ofs: number; w: number; h: number; x: number; y: number }[] = [];
+    const hidden = (e: Entity) => e.rendermode === '10' || (!!e.rendermode && e.rendermode !== '0' && e.renderamt === '0');
+    const drawn: [number, Vec][] = [[0, [0, 0, 0]], ...entities.filter(e => e.model?.startsWith('*') && !hidden(e) && !/^(trigger_|func_(areaportal|occluder|viscluster|clip_vphysics|precipitation|dustmotes|smokevolume|buyzone|bomb_target|hostage_rescue))/.test(e.classname)).map((e): [number, Vec] => [+e.model.slice(1), vec(e.origin)])];
+    for (const [mi, org] of drawn) for (let f = i32(M.ofs + mi * 48 + 40), end = f + i32(M.ofs + mi * 48 + 44); f < end; f++) {
+      const o = FA.ofs + f * 56, ti = i16(o + 10);
+      if (ti < 0 || i16(o + 12) >= 0) continue; // (displacements are drawn as terrain)
+      const t = TI.ofs + ti * 72, flags = i32(t + 64), td = i32(t + 68);
+      if (flags & HIDDEN || td < 0 || TOOL.test(texName(td))) continue;
+      const vs = [...Array(i16(o + 8)).keys()].map(k => { const se = i32(SE.ofs + (i32(o + 4) + k) * 4); return vert(u16(ED.ofs + Math.abs(se) * 4 + (se >= 0 ? 0 : 2))); });
+      const d = TD.ofs + td * 32, mapped = i32(o + 20) >= 0 && u8[o + 16] !== 255 && !(flags & 0x400); // lightmapped (style 0)
+      const a = acc[matOf(texName(td), [0, 4, 8].map(q => Math.min(1, Math.max(0, f32(d + q))) ** (1 / 2.2)) as Vec, mapped ? 1 : 0)], first = a.pos.length / 3;
+      const dot = (v: Vec, q: number) => v[0] * f32(t + q) + v[1] * f32(t + q + 4) + v[2] * f32(t + q + 8) + f32(t + q + 12);
+      for (const v of vs) {
+        a.pos.push(v[0] + org[0], v[1] + org[1], v[2] + org[2]);
+        a.uv.push(dot(v, 0) / (i32(d + 16) || 1), dot(v, 16) / (i32(d + 20) || 1));
+        if (mapped) a.lm.push(dot(v, 32) - i32(o + 28), dot(v, 48) - i32(o + 32)); // in luxels: placed in the atlas below
+      }
+      if (mapped) lit.push({ a, at: a.lm.length - 2 * vs.length, n: vs.length, ofs: LM.ofs + i32(o + 20), w: i32(o + 36) + 1, h: i32(o + 40) + 1, x: 0, y: 0 });
+      const [pn0, pn1, pn2] = planes[u16(o)], u = vs.reduce((s, v, i) => { const w = vs[(i + 1) % vs.length]; return [s[0] + (v[1] - w[1]) * (v[2] + w[2]), s[1] + (v[2] - w[2]) * (v[0] + w[0]), s[2] + (v[0] - w[0]) * (v[1] + w[1])]; }, [0, 0, 0]);
+      const flip = (u[0] * pn0 + u[1] * pn1 + u[2] * pn2) * (u8[o + 2] ? -1 : 1) < 0; // wound to face the plane's side
+      for (let k = 1; k + 1 < vs.length; k++) a.index.push(first, first + (flip ? k + 1 : k), first + (flip ? k : k + 1));
+    }
+    // the lightmaps, packed into rows of an atlas: luxels (r, g, b, exponent) as gamma, halved
+    let W = 256;
+    while (W * W < 1.3 * lit.reduce((s, b) => s + b.w * b.h, 0)) W *= 2;
+    let x = 0, y = 0, row = 0;
+    for (const b of [...lit].sort((p, q) => q.h - p.h)) {
+      if (x + b.w > W) { x = 0; y += row; row = 0; }
+      Object.assign(b, { x, y }); x += b.w; row = Math.max(row, b.h);
+    }
+    const H = Math.max(1, 2 ** Math.ceil(Math.log2(y + row || 1))), rgba = new Uint8Array(W * H * 4);
+    for (const b of lit) {
+      for (let j = 0; j < b.h; j++) for (let i = 0; i < b.w; i++) {
+        const l = b.ofs + 4 * (j * b.w + i), e = 2 ** dv.getInt8(l + 3) / 255, p = ((b.y + j) * W + b.x + i) * 4;
+        for (let q = 0; q < 3; q++) rgba[p + q] = Math.min(255, Math.round(127.5 * (u8[l + q] * e) ** (1 / 2.2)));
+        rgba[p + 3] = 255;
+      }
+      for (let k = 0; k < b.n; k++) { b.a.lm[b.at + 2 * k] = (b.x + b.a.lm[b.at + 2 * k] + 0.5) / W; b.a.lm[b.at + 2 * k + 1] = (b.y + b.a.lm[b.at + 2 * k + 1] + 0.5) / H; }
+    }
+    return {
+      /** A static prop's meshes, placed (R: rotation times scale, o: origin), lit by its .vhv: colours per strip group
+       *  vertex (BGRA; three of them, one per bump direction, when 12 bytes a vertex), gamma with 2x overbright. */
+      prop(meshes: NonNullable<Model>['meshes'], R: number[][], o: Vec, vhv?: Uint8Array) {
+        const V = vhv && new DataView(vhv.buffer, vhv.byteOffset, vhv.byteLength), size = V ? V.getUint32(12, true) : 0, groups: [number, number][] = [];
+        for (let i = 0; V && i < V.getInt32(20, true); i++) if (V.getUint32(40 + 28 * i, true) === 0) groups.push([V.getUint32(44 + 28 * i, true), V.getUint32(48 + 28 * i, true)]);
+        const light = (key: number): Vec => {
+          const [n, at] = groups[key >>> 16] ?? [0, 0], i = key & 0xffff;
+          if (!vhv || i >= n || at + (i + 1) * size > vhv.length) return [0.9, 0.9, 0.9];
+          const c: Vec = [0, 0, 0], k = size >= 12 ? 3 : 1;
+          for (let s = 0; s < k; s++) for (let q = 0; q < 3; q++) c[q] += (vhv[at + i * size + 4 * s + 2 - q] / 127.5) ** 2.2 / k;
+          return c.map(v => v ** (1 / 2.2)) as Vec;
+        };
+        for (const m of meshes) {
+          const a = acc[matOf(m.mat, [1, 1, 1], 2)], first = a.pos.length / 3;
+          for (let v = 0; v < m.pos.length / 3; v++) {
+            const [px, py, pz] = [m.pos[3 * v], m.pos[3 * v + 1], m.pos[3 * v + 2]];
+            for (let r = 0; r < 3; r++) a.pos.push(R[r][0] * px + R[r][1] * py + R[r][2] * pz + o[r]);
+            a.uv.push(m.uv[2 * v], m.uv[2 * v + 1]);
+            a.light.push(...light(m.light[v]));
+          }
+          for (const i of m.index) a.index.push(first + i);
+        }
+      },
+      done(): Look {
+        const parts: Part[] = acc.flatMap((a, mat) => a.index.length ? [{
+          mat, pos: new Float32Array(a.pos), uv: new Float32Array(a.uv), index: new Uint32Array(a.index),
+          ...(mats[mat].lit === 1 && { lm: new Float32Array(a.lm) }), ...(mats[mat].lit === 2 && { light: new Float32Array(a.light) }),
+        }] : []);
+        return { mats, parts, lightmap: lit.length ? { w: W, h: H, rgba } : null, sky: sky(pak, entities.find(e => e.classname === 'worldspawn')?.skyname ?? '') };
+      },
+    };
+  }
 }
 
 /** A convex hull's planes (n·x <= d) from its own triangles: oriented away from its centre, duplicates merged. */
@@ -259,7 +346,7 @@ export async function resolveMap(def: MapDef, read: (url: string) => Promise<Arr
   if (!r.ok) throw new Error(`${u} not found`);
   return r.arrayBuffer();
 })): Promise<MapDef> {
-  const b = def.bsp && parseBsp(await unpack(await read(def.bsp.url))), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain, tris: b.tris, props: b.props, settings: { ...b.settings, ...def.settings } } : def;
+  const b = def.bsp && parseBsp(await unpack(await read(def.bsp.url)), { look: def.bsp.look }), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain, tris: b.tris, props: b.props, look: b.look, settings: { ...b.settings, ...def.settings } } : def;
   if (!full.routeOnSurface || !full.route) return full;
   const world = buildWorld(full);
   return { ...full, world, route: ridingLine(world, full.route) };
