@@ -42,11 +42,18 @@
   .panel a { color: var(--accent); } .credits, .note { font-size: 12px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
   .grid { display: grid; grid-template-columns: 1fr 120px; gap: 6px 12px; align-items: center; }
-  .grid input[type=number], .grid input[type=text], .grid select, input.link { width: 100%; font: inherit; color: var(--fg); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .grid input[type=number], .grid input[type=text], .grid input[type=password], .grid select, input.link, .row select, .row input[type=text] { width: 100%; font: inherit; color: var(--fg); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
   input.link { display: block; margin-top: 6px; font-size: 12px; }
+  .row select, .row input[type=text] { flex: 1; width: auto; min-width: 150px; }
   .board { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
   .board th, .board td { padding: 3px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
   .board th:first-child, .board td:first-child { text-align: left; color: var(--dim); }
+  .lb td:nth-child(2), .lb th:nth-child(2) { text-align: left; } .lb tr[data-row] { cursor: pointer; } .lb tr[data-row]:hover td { background: rgba(255, 255, 255, .04); }
+  .lb tr.me td { color: var(--gold); font-weight: 700; } .lb tr.splits td { text-align: left; white-space: normal; color: var(--dim); font-size: 12px; } .lb tr.splits b { color: var(--fg); font-weight: 500; }
+  .lb button { padding: 2px 8px; font-size: 12px; }
+  .seg { display: inline-flex; } .seg button { border-radius: 0; } .seg button:first-child { border-radius: 8px 0 0 8px; } .seg button:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+  .seg button.on { background: var(--accent); color: #06101e; border-color: var(--accent); font-weight: 700; }
+  .map em small { display: block; color: var(--dim); font-size: 11px; font-weight: 400; }
   .grid label { color: var(--dim); } .grid input[type=checkbox] { justify-self: start; width: 18px; height: 18px; }
   kbd { font: 12px ui-monospace, Menlo, monospace; background: rgba(255, 255, 255, .1); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
   .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; color: var(--dim); }

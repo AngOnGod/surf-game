@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { deflateRawSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import worker, { RUNS as BOARD_RUNS } from '../server/worker';
 import { describe, expect, it } from 'vitest';
 import {
   type Cmd, type Vec, DEFAULTS, HULL_MIN, HULL_STAND, NO_CMD, accelerate, airAccelerate, categorizePosition, clipVelocity,
@@ -677,4 +679,54 @@ describe('recorded runs', () => {
       expect(t).toBe(time);
     }, 120_000);
   }
+});
+
+// the online leaderboard (server/worker.ts) over an in-memory SQLite standing in for D1
+describe('leaderboard server', () => {
+  const env = () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(readFileSync('server/schema.sql', 'utf8'));
+    const prepare = (sql: string) => {
+      let v: never[] = [];
+      const st = { bind: (...a: never[]) => ((v = a), st), first: async () => db.prepare(sql).get(...v) ?? null, all: async () => ({ results: db.prepare(sql).all(...v) }), run: async () => db.prepare(sql).run(...v) };
+      return st;
+    };
+    return { DB: { prepare, batch: async (ss: { run(): Promise<unknown> }[]) => { for (const st of ss) await st.run(); } }, ADMIN_KEY: 'admin' };
+  };
+  const call = async (e: ReturnType<typeof env>, method: string, path: string, body?: object, headers: Record<string, string> = {}) => {
+    const r = await worker.fetch(new Request(`https://board${path}`, { method, headers: { origin: 'http://localhost:5173', 'content-type': 'application/json', ...headers }, body: body && JSON.stringify(body) }), e as never);
+    return [r.status, await r.json()] as [number, any];
+  };
+  it('knows the maps on the board and their fast runs, as the game rates them', () => {
+    expect(BOARD_RUNS).toEqual(Object.fromEntries(mapDefs.filter(m => m.difficulty).map(m => [m.id, m.difficulty!.run])));
+  });
+  it('joins unique names, keeps only faster times, checks keys and times, ranks, and lets the admin delete', async () => {
+    const e = env(), [, a] = await call(e, 'POST', '/join', { name: ' Ang ' });
+    expect(a.name).toBe('Ang');
+    expect((await call(e, 'POST', '/join', { name: 'ang' }))[0]).toBe(409); // names are unique whatever their case
+    expect((await call(e, 'POST', '/join', { name: '<b>' }))[0]).toBe(400);
+    const up = (time: number, o: object = {}) => call(e, 'POST', '/time', { id: a.id, key: a.key, map: 'mesa', tick: 256, time, splits: [12.5, null], ...o });
+    expect(await up(60)).toEqual([200, { time: 60, rank: 1 }]);
+    expect(await up(70)).toEqual([200, { time: 60, rank: 1 }]); // slower: the faster one stays
+    expect(await up(55)).toEqual([200, { time: 55, rank: 1 }]);
+    for (const [o, status] of [[{ key: 'x' }, 403], [{ time: 30 }, 400], [{ map: 'test' }, 400], [{ tick: 64 }, 400], [{ splits: Array(65).fill(1) }, 400]] as const)
+      expect((await up(55, o))[0]).toBe(status); // wrong key, under 0.7 x the fast run, not on the board, 64 tick, too many splits
+    const [, b] = await call(e, 'POST', '/join', { name: 'Bob' });
+    await call(e, 'POST', '/time', { id: b.id, key: b.key, map: 'mesa', tick: 256, time: 50 });
+    expect((await call(e, 'GET', '/board?map=mesa&tick=256'))[1].map((r: { name: string; time: number; splits: unknown }) => [r.name, r.time, r.splits])).toEqual([['Bob', 50, []], ['Ang', 55, [12.5, null]]]);
+    expect((await call(e, 'GET', `/summary?tick=256&id=${a.id}`))[1]).toEqual({ mesa: { name: 'Bob', time: 50, n: 2, rank: 2 } });
+    expect((await call(e, 'GET', '/summary?tick=128'))[1]).toEqual({});
+    expect((await call(e, 'POST', '/rename', { id: a.id, key: a.key, name: 'BOB' }))[0]).toBe(409);
+    expect(await call(e, 'POST', '/rename', { id: a.id, key: a.key, name: 'Angus' })).toEqual([200, { id: a.id, name: 'Angus' }]);
+    expect(await call(e, 'POST', '/me', { id: a.id, key: a.key })).toEqual([200, { id: a.id, name: 'Angus' }]);
+    expect((await call(e, 'DELETE', `/player?id=${b.id}`))[0]).toBe(403);
+    expect((await call(e, 'DELETE', `/player?id=${b.id}`, undefined, { 'x-admin-key': 'admin' }))[0]).toBe(200);
+    expect((await call(e, 'DELETE', `/time?id=${a.id}&map=mesa&tick=256`, undefined, { 'x-admin-key': 'admin' }))[0]).toBe(200);
+    expect((await call(e, 'GET', '/board?map=mesa&tick=256'))[1]).toEqual([]);
+  });
+  it('rate limits joins from one address', async () => {
+    const e = env(), codes = [];
+    for (let i = 0; i < 11; i++) codes.push((await call(e, 'POST', '/join', { name: `p${i}` }))[0]);
+    expect(codes).toEqual([...Array(10).fill(200), 429]);
+  });
 });

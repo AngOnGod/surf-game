@@ -26,3 +26,8 @@ scratch/cw-*
 scratch/pr-*
 scratch/mesa-flood*
 scratch/mesa-way*
+
+# the leaderboard server: its tools, local state and local secrets
+server/node_modules
+server/.wrangler
+server/.dev.vars

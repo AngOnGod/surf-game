@@ -6,6 +6,7 @@ import { makeBot } from './bot';
 import { BLOCK, type Demo, decode, replay } from './plan';
 import { RUNS } from './runs';
 import { resolveMap, unpack } from './bsp';
+import * as online from './online';
 import type { Look } from './look';
 import type { Image } from './vtf';
 
@@ -16,9 +17,11 @@ const store = {
   get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
 };
+const GAME: Settings = { ...DEFAULTS, tickrate: 256 }; // this game's defaults: a surf server's, at 256 tick
 const saved = store.get<Partial<Settings> & { v?: number }>('surf.settings', {});
 if (!saved.v) { delete saved.bhopLimiter; delete saved.autobhop; } // v1 saved vanilla CS:GO's bhop settings: switch to the surf-server ones
-const settings: Settings & { v: number } = { ...DEFAULTS, ...saved, v: 2 };
+if ((saved.v ?? 0) < 3) delete saved.tickrate; // v2 and older defaulted to 128 tick: everyone moves to 256 once
+const settings: Settings & { v: number } = { ...GAME, ...saved, v: 3 };
 interface PB { time?: number; splits?: (number | undefined)[]; stages?: (number | undefined)[] }
 const pbKey = (id: string, tick = settings.tickrate) => `surf.pb.${id}${tick === 128 ? '' : '@' + tick}`; // each tick rate has its own times
 // like a server's: times only count with the standard movement settings
@@ -376,8 +379,8 @@ const lock = async () => {
 };
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
-  if (locked && pick) document.exitPointerLock(); // (the lock requested with the click landed after the load failed)
-  else if (locked) show(null); else show(pick ? 'pick' : 'pause');
+  if (locked && (pick || asking)) document.exitPointerLock(); // (the lock requested with the click landed after the load failed)
+  else if (locked) show(null); else show(pick ? 'pick' : asking ? 'join' : 'pause');
 });
 canvas.addEventListener('click', () => { if (!locked) lock(); });
 
@@ -465,8 +468,9 @@ function onEvent(e: GameEvent) {
   } else if (e.type === 'finish') {
     if (e.practice || custom()) return flash(`Finished  ${fmt(e.time)}\n<span class="gold">${e.practice ? 'practice' : 'custom settings'}: not saved</span>`, 5000);
     const best = pb.time === undefined || e.time < pb.time;
-    if (best) store.set(pbKey(id), { ...pb, time: e.time, splits: e.splits });
-    flash(`${best ? '<span class="gold">NEW PERSONAL BEST</span>\n' : 'Finished\n'}${fmt(e.time)}${pb.time !== undefined ? '  ' + diff(e.time - pb.time) : ''}`, 6000);
+    const text = `${best ? '<span class="gold">NEW PERSONAL BEST</span>\n' : 'Finished\n'}${fmt(e.time)}${pb.time !== undefined ? '  ' + diff(e.time - pb.time) : ''}`;
+    flash(text, 6000);
+    if (best) { store.set(pbKey(id), { ...pb, time: e.time, splits: e.splits }); shareRun(e.time, e.splits, text); }
   }
 }
 
@@ -486,7 +490,7 @@ function hud() {
   set('timer', timer);
   const idx = staged ? st.index : session.section, name = sectionName(idx);
   set('section', `${staged ? 'Stage' : 'Section'} ${idx + 1}/${total}${name ? ' · ' + name : ''}`);
-  set('mode', [autopilot ? 'AUTOPILOT' : '', p.noclip ? 'NOCLIP' : '', settings.tickrate !== 128 ? `${settings.tickrate} TICK` : ''].filter(Boolean).join('  ·  '));
+  set('mode', [autopilot ? 'AUTOPILOT' : '', p.noclip ? 'NOCLIP' : '', settings.tickrate !== 256 ? `${settings.tickrate} TICK` : ''].filter(Boolean).join('  ·  '));
   const c = lastCmd;
   for (const [k, on] of [['kW', c.fwd > 0], ['kS', c.fwd < 0], ['kA', c.side < 0], ['kD', c.side > 0], ['kJ', c.jump], ['kC', c.duck]] as const) $(k).classList.toggle('on', on);
   const dbg = $('debug');
@@ -508,59 +512,74 @@ function hud() {
 
 // ---------------------------------------------------------------- menus
 
-type Screen = 'maps' | 'pause' | 'settings' | 'pick' | 'board';
-// ---------------------------------------------------------------- leaderboard: no server, so times travel in links
+type Screen = 'maps' | 'pause' | 'settings' | 'pick' | 'board' | 'join';
+// ---------------------------------------------------------------- leaderboard: everyone's full-run PBs (src/online.ts)
 
-type Times = Record<string, Record<string, { r?: number; s?: (number | null)[] }>>; // tick -> map id -> run / stage times
-const TICKS = [128, 64, 256];
 const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
-const myName = () => store.get('surf.name', '');
-const friends = () => store.get<Record<string, { at: number; d: Times }>>('surf.friends', {});
-const b64 = { // base64url of UTF-8 JSON
-  enc: (o: unknown) => btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
-  dec: (s: string) => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)))),
-};
-function myTimes(): Times {
-  const d: Times = {};
-  for (const tick of TICKS) for (const m of MAPS) {
-    const pb: PB = store.get(pbKey(m.id, tick), {});
-    if (pb.time !== undefined || pb.stages?.some(t => t != null)) (d[tick] ??= {})[m.id] = { r: pb.time, s: pb.stages?.map(t => t ?? null) };
-  }
-  return d;
+const RATED = MAPS.filter(m => m.difficulty), TOP = 25; // the maps on the board (Test Range isn't), rows shown
+let asking = false, joinFrom: Screen | null = null, note = '', screenNow: Screen | null = null;
+let boardMap = '', boardTick = 256, open = -1, sure = '', entries: { key: string; list?: online.Entry[]; error?: string } = { key: '' };
+let sums: { tick: number; at: number; data: online.Summary } | null = null;
+const pbsOf = () => RATED.flatMap(m => [256, 128].map(tick => ({ map: m.id, tick, pb: store.get<PB>(pbKey(m.id, tick), {}) })))
+  .filter(x => x.pb.time !== undefined).map(({ map, tick, pb }) => ({ map, tick, time: pb.time!, splits: (pb.splits ?? []).map(t => t ?? null) }));
+function shareRun(time: number, splits: (number | undefined)[], text: string) { // a new full-run PB goes up (the first one asks to join)
+  if (!session.def.difficulty || (settings.tickrate !== 128 && settings.tickrate !== 256)) return; // 64 tick PBs stay here
+  if (online.me()) online.upload({ map: session.def.id, tick: settings.tickrate, time, splits: splits.map(t => t ?? null) }).then(rank => rank && flash(`${text}\n#${rank} on the leaderboard`, 6000), () => {});
+  else if (!store.get('surf.asked', false)) { asking = true; joinFrom = null; if (locked) document.exitPointerLock(); else show('join'); }
 }
-function addFriend(o: { n?: unknown; d?: Record<string, Record<string, { r?: unknown; s?: unknown }>> }) { // from a link: untrusted
-  const n = typeof o?.n === 'string' ? o.n.trim().slice(0, 24) : '', d: Times = {}, t = (x: unknown) => (typeof x === 'number' && x > 0 && x < 1e6 ? x : null);
-  if (!n) throw new Error('no name in it');
-  if (n === myName()) throw new Error('it has your own name (use different names)');
-  for (const tick of TICKS) for (const m of MAPS) {
-    const e = o.d?.[tick]?.[m.id];
-    if (e && typeof e === 'object') (d[tick] ??= {})[m.id] = { r: t(e.r) ?? undefined, s: Array.isArray(e.s) ? e.s.slice(0, 64).map(t) : undefined };
-  }
-  store.set('surf.friends', { ...friends(), [n]: { at: Date.now(), d } });
-  return n;
+async function joinBoard(name: string) {
+  store.set('surf.name', name);
+  try { await online.join(name); } catch (err) { note = (err as Error).message; return show('join'); }
+  store.set('surf.asked', true); asking = false; note = ''; sums = null; entries.key = '';
+  online.upload(...pbsOf()); // the PBs made before joining
+  if (joinFrom) show(joinFrom); else { show(null); lock(); }
+  flash(`On the leaderboard as ${esc(online.me()!.name)}`, 4000);
 }
-let boardNote = '';
-function openLink() {
-  const m = location.hash.match(/^#times=([\w-]+)$/);
-  if (!m) return;
-  history.replaceState(null, '', location.pathname + location.search);
-  try { boardNote = `Added ${esc(addFriend(b64.dec(m[1])))}'s times.`; } catch (err) { boardNote = `That times link didn't load: ${esc((err as Error).message)}.`; }
-  show('board');
-}
-addEventListener('hashchange', openLink);
-function board() { // per map (and tick rate): a column per player, the best in each row in gold
-  const cols: [string, Times][] = [[myName() || 'You', myTimes()], ...Object.entries(friends()).sort(([a], [b]) => a.localeCompare(b)).map(([n, f]) => [n, f.d] as [string, Times])];
-  let html = '';
-  for (const tick of TICKS) for (const m of MAPS) {
-    const at = cols.map(([, d]) => d[tick]?.[m.id]), n = Math.max(0, ...at.map(e => e?.s?.length ?? 0));
-    const rows = [['Run', at.map(e => e?.r)] as const, ...Array.from({ length: n }, (_, i) => [m.stages?.[i]?.name ?? `Stage ${i + 1}`, at.map(e => e?.s?.[i] ?? undefined)] as const)]
-      .filter(([, ts]) => ts.some(t => t != null));
-    if (!rows.length) continue;
-    html += `<h2>${m.name}${tick === 128 ? '' : ` · ${tick} tick`}</h2><table class="board"><tr><th></th>${cols.map(([c]) => `<th>${esc(c)}</th>`).join('')}</tr>` +
-      rows.map(([label, ts]) => { const best = Math.min(...ts.map(t => t ?? 1e9)); return `<tr><td>${label}</td>${ts.map(t => `<td${t === best ? ' class="gold"' : ''}>${t != null ? fmt(t) : '—'}</td>`).join('')}</tr>`; }).join('') + '</table>';
+function boardHtml() {
+  const m = RATED.find(x => x.id === boardMap) ?? RATED.find(x => x.id === session.def.id) ?? RATED[0], key = `${m.id}@${boardTick}`, me = online.me(), admin = store.get('surf.admin', '');
+  boardMap = m.id;
+  if (entries.key !== key) {
+    entries = { key };
+    online.board(m.id, boardTick).then(list => (entries = { key, list }), err => (entries = { key, error: (err as Error).message }))
+      .then(() => { if (screenNow === 'board' && entries.key === `${boardMap}@${boardTick}`) show('board'); });
   }
-  const fr = Object.entries(friends());
-  return (html || '<p>No times yet.</p>') + (fr.length ? `<h2>Friends</h2><div class="grid">${fr.map(([n, f]) => `<label>${esc(n)} · updated ${new Date(f.at).toLocaleDateString()}</label><button data-unfriend="${esc(n)}">Remove</button>`).join('')}</div>` : '');
+  const head = `<div class="row"><select data-board>${RATED.map(x => `<option value="${x.id}"${x === m ? ' selected' : ''}>${x.name}</option>`).join('')}</select>` +
+    `<span class="seg">${[256, 128].map(t => `<button data-tick="${t}"${t === boardTick ? ' class="on"' : ''}>${t} tick</button>`).join('')}</span></div>` +
+    (me ? '' : `<p>You're not on it yet. <button data-act="join-open">Join</button></p>`);
+  const { list, error } = entries;
+  if (!list) return head + `<p>${error ? `Couldn't reach the leaderboard: ${esc(error)}` : 'Loading…'}</p>`;
+  if (!list.length) return head + '<p>No times yet.</p>';
+  const mine = list.findIndex(r => r.id === me?.id), cols = admin ? 5 : 4;
+  const row = (i: number) => {
+    const r = list[i], del = (k: string, what: string) => `<button data-del="${k}${i}">${sure === k + i ? 'Sure?' : what}</button>`;
+    return `<tr data-row="${i}"${r.id === me?.id ? ' class="me"' : ''}><td>${i + 1}</td><td>${esc(r.name)}</td><td>${fmt(r.time)}</td><td>${new Date(r.at).toLocaleDateString()}</td>${admin ? `<td>${del('t', 'Delete')}</td>` : ''}</tr>` +
+      (open === i ? `<tr class="splits"><td colspan="${cols}">${splitsOf(m, r)}${admin ? ` ${del('p', 'Delete player')}` : ''}</td></tr>` : '');
+  };
+  return head + `<table class="board lb"><tr><th>#</th><th>Name</th><th>Time</th><th>Date</th>${admin ? '<th></th>' : ''}</tr>` +
+    [...Array(Math.min(list.length, TOP)).keys()].map(row).join('') + (mine >= TOP ? `<tr><td colspan="${cols}">…</td></tr>${row(mine)}` : '') + '</table>';
+}
+function splitsOf(m: MapDef, r: online.Entry) { // each section's time in this run (its splits: the run's time entering each next section)
+  const names = m.stages?.map((st, i) => st.name ?? `Stage ${i + 1}`) ?? ['Start', ...(m.checkpoints ?? []).map((c, i) => c.name ?? `Checkpoint ${i + 1}`)];
+  if (names.length < 2 || !r.splits.some(t => t != null)) return 'No section times for this run';
+  const at = [0, ...names.slice(1).map((_, i) => r.splits[i] ?? null), r.time];
+  return names.map((n, i) => `${esc(n)} <b>${at[i] != null && at[i + 1] != null ? fmt(at[i + 1]! - at[i]!) : '—'}</b>`).join(' · ');
+}
+const sumOf = (m: MapDef) => { const x = sums?.tick === settings.tickrate ? sums.data[m.id] : undefined; return x ? `<small>#1 ${fmt(x.time)} ${esc(x.name)}</small>${x.rank ? `<small>you #${x.rank} of ${x.n}</small>` : ''}` : ''; };
+function fetchSums() { // the map list's #1s and my ranks: one request per menu open, kept 30 s
+  const tick = settings.tickrate;
+  if ((tick !== 128 && tick !== 256) || (sums?.tick === tick && performance.now() - sums.at < 30_000)) return;
+  online.summary(tick).then(data => {
+    sums = { tick, at: performance.now(), data };
+    if (screenNow === 'maps') for (const m of RATED) { const el = document.querySelector(`[data-sum="${m.id}"]`); if (el) el.innerHTML = sumOf(m); }
+  }, () => {});
+}
+function boardSettings() {
+  const m = online.me();
+  return `<h2>Leaderboard</h2>${note ? `<p class="gold">${note}</p>` : ''}` + (m
+    ? `<div class="grid"><label>Your name on it</label><input type="text" data-rename maxlength="24" value="${esc(m.name)}"><label>Upload my PBs</label><input type="checkbox" data-upload${online.uploading() ? ' checked' : ''}></div>` +
+      `<p>Your player code signs in as you on another device: keep it private. <input class="link" readonly value="${online.code(m)}"></p><div class="row"><button data-act="copy-code">Copy player code</button></div>`
+    : `<p>You're not on it yet. <button data-act="join-open">Join</button></p>`) +
+    `<div class="grid"><label>Use a player code from another device</label><input type="text" data-code placeholder="paste it"><label>Admin key (kept on this device)</label><input type="password" data-admin value="${esc(store.get('surf.admin', ''))}"></div>`;
 }
 
 let backTo: Screen = 'maps';
@@ -589,6 +608,7 @@ function level(m: MapDef): [string, string] { // the map list's difficulty: a ba
 
 function show(screen: Screen | null) {
   menuOpen = !!screen;
+  screenNow = screen;
   $('menu').style.display = screen ? 'flex' : 'none';
   if (!screen) return;
   keys.clear();
@@ -596,7 +616,7 @@ function show(screen: Screen | null) {
   if (screen === 'maps') {
     panel.innerHTML = `<h1>SURF</h1><p>Source-engine air strafing and ramp physics, ${settings.tickrate} tick.</p><h2>Maps</h2>` +
       `<p class="note">Difficulty is mostly the map's skill tier (based on community surf servers' ratings), plus a little for a long run and for falls that send you far back.</p>` +
-      MAPS.map((m, i) => { const pb: PB = store.get(pbKey(m.id), {}), [badge, parts] = level(m); return `<button class="map" data-map="${i}">${badge}<div><b>${m.name}</b><span>${m.blurb ?? ''}</span>${parts}</div><em>${pb.time !== undefined ? 'PB ' + fmt(pb.time) : ''}</em></button>`; }).join('') +
+      MAPS.map((m, i) => { const pb: PB = store.get(pbKey(m.id), {}), [badge, parts] = level(m); return `<button class="map" data-map="${i}">${badge}<div><b>${m.name}</b><span>${m.blurb ?? ''}</span>${parts}</div><em>${pb.time !== undefined ? 'PB ' + fmt(pb.time) : ''}<i data-sum="${m.id}">${sumOf(m)}</i></em></button>`; }).join('') +
       `<div class="row"><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div><h2>Controls</h2><div class="keys">${CONTROLS.map(([k, d]) => `<span><kbd>${k}</kbd></span><span>${d}</span>`).join('')}</div>` +
       `<h2>Credits</h2><p class="credits">${MAPS.filter(m => m.credit).map(({ name, credit: c }) => `<b>${name}</b> by ${c!.by}${c!.license ? `, <a href="${c!.license[1]}" target="_blank" rel="noopener">${c!.license[0]}</a>` : ''} · <a href="${c!.source}" target="_blank" rel="noopener">source</a>`).join('<br>')}<br>Maps are the authors' unmodified files; zones and autopilot lines are this game's own.</p>`;
   } else if (screen === 'pick') {
@@ -606,40 +626,56 @@ function show(screen: Screen | null) {
   } else if (screen === 'pause') {
     panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-go="maps">Maps</button><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div>`;
   } else if (screen === 'board') {
-    panel.innerHTML = `<h1>LEADERBOARD</h1><p>Times stay in each player's browser, so they travel by link: copy yours and send it. When a friend opens it, your times join their board (they send theirs back for yours). Only runs with the standard movement settings count, and each tick rate has its own times.</p>` +
-      (boardNote ? `<p class="gold">${boardNote}</p>` : '') +
-      `<div class="grid"><label>Your name</label><input type="text" data-name maxlength="24" placeholder="name" value="${esc(myName())}"></div>` +
-      `<div class="row"><button class="primary" data-act="share">Copy my times link</button><button data-go="${backTo}">Back</button></div>` + board();
-    boardNote = '';
+    panel.innerHTML = `<h1>LEADERBOARD</h1><p>Everyone's best full runs at the standard movement settings. Once you've joined, your PBs go up by themselves. Click a time to see its sections.</p>` +
+      boardHtml() + `<div class="row"><button data-go="${backTo}">Back</button></div>`;
+  } else if (screen === 'join') {
+    panel.innerHTML = `<h1>LEADERBOARD</h1><p>Put your times on the leaderboard? Your name and times will be public.</p>${note ? `<p class="bad">${esc(note)}</p>` : ''}` +
+      `<div class="row"><input type="text" data-join maxlength="24" placeholder="your name" value="${esc(store.get('surf.name', ''))}"><button class="primary" data-act="join">Join</button><button data-act="later">Not now</button></div>`;
+    note = '';
+    (panel.querySelector('[data-join]') as HTMLInputElement).focus();
   } else {
-    panel.innerHTML = `<h1>SETTINGS</h1><h2>Movement</h2><div class="grid"><label>Tick rate (autopilot made for 128)</label><select data-k="tickrate"><option>128</option><option>64</option><option>256</option></select>` +
+    panel.innerHTML = `<h1>SETTINGS</h1><h2>Movement</h2><div class="grid"><label>Tick rate</label><select data-k="tickrate"><option>256</option><option>128</option><option>64</option></select>` +
       NUMS.map(([k, l, st]) => `<label>${l}</label><input type="number" step="${st}" data-k="${k}" value="${+(settings[k] as number).toFixed(4)}">`).join('') +
       BOOLS.map(([k, l]) => `<label>${l}</label><input type="checkbox" data-k="${k}" ${settings[k] ? 'checked' : ''}>`).join('') +
-      `</div><p>Times only save with the movement settings at their defaults, as on a server (custom runs say so); each tick rate keeps its own times.</p><div class="row"><button class="primary" data-go="${backTo}">Back</button><button data-act="defaults">Reset to defaults</button></div>`;
+      `</div><p>Times only save with the movement settings at their defaults, as on a server (custom runs say so); each tick rate keeps its own times, and the leaderboard has 256 and 128 tick ones (64 tick times stay on this device). ` +
+      `At 256 tick the autopilot finishes surf_utopia_v3, surf_mesa, Gauntlet, Utopia-like and Four Stages, and surf_cyberwave's first stage; surf_aircontrol_ksf's finishes at 128 only.</p>` +
+      boardSettings() + `<div class="row"><button class="primary" data-go="${backTo}">Back</button><button data-act="defaults">Reset to defaults</button></div>`;
+    note = '';
     (panel.querySelector('select') as HTMLSelectElement).value = String(settings.tickrate);
   }
   if (screen === 'maps' || screen === 'pause') backTo = screen;
+  if (screen === 'maps') fetchSums();
 }
 
 $('panel').addEventListener('click', e => {
-  const b = (e.target as HTMLElement).closest('button');
+  const b = (e.target as HTMLElement).closest('button'), tr = (e.target as HTMLElement).closest('tr[data-row]') as HTMLElement | null;
+  if (!b && tr) { open = open === +tr.dataset.row! ? -1 : +tr.dataset.row!; sure = ''; return show('board'); } // a run's sections
   if (!b) return;
   if (b.dataset.map) { show(null); lock(); load(MAPS[+b.dataset.map]); }
   if (b.dataset.go) { pick = null; show(b.dataset.go as Screen); }
   if (b.dataset.act === 'resume') { show(null); lock(); }
   if (b.dataset.act === 'restart') { session.restart(); show(null); lock(); }
-  if (b.dataset.unfriend) { const fr = friends(); delete fr[b.dataset.unfriend]; store.set('surf.friends', fr); show('board'); }
-  if (b.dataset.act === 'share') {
-    const n = myName(), url = `${location.origin}${location.pathname}#times=${b64.enc({ n, d: myTimes() })}`;
-    if (!n) { boardNote = 'Enter your name first.'; return show('board'); }
-    navigator.clipboard.writeText(url).then(() => 'Link copied: paste it to your friends.', () => `Copy this link: <input class="link" readonly value="${esc(url)}">`)
-      .then(note => { boardNote = note; show('board'); });
+  if (b.dataset.act === 'join') joinBoard((b.parentElement!.querySelector('[data-join]') as HTMLInputElement).value);
+  if (b.dataset.act === 'later') { if (!joinFrom) store.set('surf.asked', true); asking = false; if (joinFrom) show(joinFrom); else { show(null); lock(); } }
+  if (b.dataset.act === 'join-open') { joinFrom = screenNow; show('join'); }
+  if (b.dataset.tick) { boardTick = +b.dataset.tick; open = -1; sure = ''; show('board'); }
+  if (b.dataset.del) { // admin: a second click deletes
+    const k = b.dataset.del, r = entries.list?.[+k.slice(1)], admin = store.get('surf.admin', '');
+    if (sure !== k) { sure = k; return show('board'); }
+    sure = '';
+    if (r) online.remove(admin, k[0] === 't' ? `time?id=${r.id}&map=${boardMap}&tick=${boardTick}` : `player?id=${r.id}`).then(() => { entries.key = ''; sums = null; show('board'); }, err => flash(esc((err as Error).message), 4000));
   }
-  if (b.dataset.act === 'defaults') { Object.assign(settings, DEFAULTS); store.set('surf.settings', settings); resize(); show('settings'); }
+  if (b.dataset.act === 'copy-code') navigator.clipboard.writeText(online.code(online.me()!)).then(() => { note = 'Player code copied.'; show('settings'); }, () => {});
+  if (b.dataset.act === 'defaults') { Object.assign(settings, GAME); store.set('surf.settings', settings); resize(); show('settings'); }
 });
+$('panel').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target as HTMLElement).dataset.join !== undefined) joinBoard((e.target as HTMLInputElement).value); });
 $('panel').addEventListener('change', e => {
   const el = e.target as HTMLInputElement, k = el.dataset.k as keyof Settings;
-  if ('name' in el.dataset) store.set('surf.name', el.value.trim().slice(0, 24));
+  if ('board' in el.dataset) { boardMap = el.value; open = -1; sure = ''; show('board'); }
+  if ('rename' in el.dataset) online.rename(el.value).then(n => { note = `Renamed to ${esc(n)}.`; sums = null; entries.key = ''; show('settings'); }, err => { note = esc((err as Error).message); show('settings'); });
+  if ('upload' in el.dataset) { online.setUploading(el.checked); if (el.checked) online.upload(...pbsOf()); }
+  if ('code' in el.dataset && el.value.trim()) online.useCode(el.value).then(n => { note = `Signed in as ${esc(n)}.`; sums = null; entries.key = ''; online.upload(...pbsOf()); show('settings'); }, err => { note = esc((err as Error).message); show('settings'); });
+  if ('admin' in el.dataset) store.set('surf.admin', el.value.trim());
   if ('pick' in el.dataset && el.files?.[0] && pick) supply(pick, el.files[0]).catch(err => flash(`That file didn't load: ${(err as Error).message}`, 6000));
   if (!k) return;
   const v = el.type === 'checkbox' ? el.checked : Number(el.value);
@@ -689,13 +725,13 @@ function draw(t: number, now: number) {
 resize();
 buildScene(session);
 show('maps');
-openLink();
+online.flush(); // PBs that couldn't go up last time
 requestAnimationFrame(frame);
 
 if (import.meta.env.DEV) { // hooks for automated checks in the browser
   Object.assign(window, {
     surf: {
-      get session() { return session; }, get demo() { return demo; }, save: saveDemo, settings, maps: MAPS, three: { THREE, scene, renderer, camera, get world() { return worldGroup; } },
+      get session() { return session; }, get demo() { return demo; }, save: saveDemo, settings, event: onEvent, online, maps: MAPS, three: { THREE, scene, renderer, camera, get world() { return worldGroup; } },
       async play(id: string, auto = false) { show(null); await load(MAPS.find(m => m.id === id)!); if (auto) startAutopilot(); },
       cam(pos: Vec, yaw: number, pitch = 0) { const p = session.p; p.noclip = true; session.invalidate(); p.origin = pos; p.vel = [0, 0, 0]; p.yaw = yaw; p.pitch = pitch; session.snap(); draw(1, performance.now()); },
       advance(seconds: number) { for (let i = Math.round(seconds * settings.tickrate); i > 0; i--) tick(); draw(1, performance.now()); }, // runs while rAF is throttled

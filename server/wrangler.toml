@@ -1,0 +1,9 @@
+# The online leaderboard (worker.ts). Deploy: npx wrangler deploy (from this folder)
+name = "surf-board"
+main = "worker.ts"
+compatibility_date = "2026-10-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "surf-board"
+database_id = "13fa9bb0-b812-4958-9242-00da98f0e6f8"
