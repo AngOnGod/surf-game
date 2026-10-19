@@ -614,7 +614,8 @@ function show(screen: Screen | null) {
   keys.clear();
   const panel = $('panel');
   if (screen === 'maps') {
-    panel.innerHTML = `<h1>SURF</h1><p>Source-engine air strafing and ramp physics, ${settings.tickrate} tick.</p><h2>Maps</h2>` +
+    panel.innerHTML = `<h1>SURF</h1><p>Source-engine air strafing and ramp physics, ${settings.tickrate} tick.</p>` +
+      (online.me() ? '' : `<p class="gold">Your times aren't on the leaderboard yet. <button data-act="join-open">Join</button></p>`) + `<h2>Maps</h2>` +
       `<p class="note">Difficulty is mostly the map's skill tier (based on community surf servers' ratings), plus a little for a long run and for falls that send you far back.</p>` +
       MAPS.map((m, i) => { const pb: PB = store.get(pbKey(m.id), {}), [badge, parts] = level(m); return `<button class="map" data-map="${i}">${badge}<div><b>${m.name}</b><span>${m.blurb ?? ''}</span>${parts}</div><em>${pb.time !== undefined ? 'PB ' + fmt(pb.time) : ''}<i data-sum="${m.id}">${sumOf(m)}</i></em></button>`; }).join('') +
       `<div class="row"><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div><h2>Controls</h2><div class="keys">${CONTROLS.map(([k, d]) => `<span><kbd>${k}</kbd></span><span>${d}</span>`).join('')}</div>` +
@@ -656,7 +657,7 @@ $('panel').addEventListener('click', e => {
   if (b.dataset.act === 'resume') { show(null); lock(); }
   if (b.dataset.act === 'restart') { session.restart(); show(null); lock(); }
   if (b.dataset.act === 'join') joinBoard((b.parentElement!.querySelector('[data-join]') as HTMLInputElement).value);
-  if (b.dataset.act === 'later') { if (!joinFrom) store.set('surf.asked', true); asking = false; if (joinFrom) show(joinFrom); else { show(null); lock(); } }
+  if (b.dataset.act === 'later') { store.set(joinFrom ? 'surf.welcomed' : 'surf.asked', true); asking = false; if (joinFrom) show(joinFrom); else { show(null); lock(); } }
   if (b.dataset.act === 'join-open') { joinFrom = screenNow; show('join'); }
   if (b.dataset.tick) { boardTick = +b.dataset.tick; open = -1; sure = ''; show('board'); }
   if (b.dataset.del) { // admin: a second click deletes
@@ -724,7 +725,8 @@ function draw(t: number, now: number) {
 
 resize();
 buildScene(session);
-show('maps');
+joinFrom = 'maps'; // not on the leaderboard: ask on arrival until joined or declined (then again at the first PB)
+show(online.me() || store.get('surf.welcomed', false) ? 'maps' : 'join');
 online.flush(); // PBs that couldn't go up last time
 requestAnimationFrame(frame);
 
