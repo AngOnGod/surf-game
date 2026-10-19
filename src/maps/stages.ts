@@ -32,6 +32,7 @@ const map: MapDef = {
   name: 'Four Stages',
   blurb: 'A short staged map: 4 independent stages, each with its own start/end zone and stage times.',
   order: 2,
+  difficulty: { tier: 1, run: 52, sections: 4 },
   spawn: courses[0].spawn,
   brushes: courses.flatMap(c => c.brushes),
   stages: courses.map((c, i) => ({ name: STAGES[i].name, start: c.start, end: c.end, spawn: c.spawn })),

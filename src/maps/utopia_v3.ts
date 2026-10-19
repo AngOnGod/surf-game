@@ -59,6 +59,7 @@ const map: MapDef = {
   blurb: 'Linear, 3 checkpoints, two mirrored routes.',
   credit: { by: 'Panzerhandschuh (with Kelao, Spoz, Sbrown)', source: 'https://gamebanana.com/mods/72161', license: ['CC BY-NC-ND 4.0', 'https://creativecommons.org/licenses/by-nc-nd/4.0/'] },
   order: 0,
+  difficulty: { tier: 1, run: 54, sections: 1 }, // the jail sends you to the start too
   spawn: { pos: [-14272, 0, 13072], yaw: 0 },
   brushes: [],
   start: { min: [-15000, -640, 12990], max: [-13560, 640, 13300] },

@@ -85,6 +85,7 @@ const map: MapDef = {
   blurb: 'Nine short neon stages, each with its own timer.',
   credit: { by: 'Arblarg', source: 'https://gamebanana.com/mods/122382', license: ['CC BY-NC-ND 4.0', 'https://creativecommons.org/licenses/by-nc-nd/4.0/'] },
   order: 0,
+  difficulty: { tier: 2, run: 59, sections: 9 }, // community tier 1, a step up here: harder than the other beginner maps
   spawn: { pos: [0, 0, 0], yaw: 90 },
   brushes: [],
   route: routeOf(STATIONS) as [number, number, number, number][],

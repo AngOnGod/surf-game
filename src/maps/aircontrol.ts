@@ -72,9 +72,10 @@ export const STATIONS: Station[] = [
 const map: MapDef = {
   id: 'aircontrol',
   name: 'surf_aircontrol_ksf',
-  blurb: 'One long linear run, 5 checkpoints; falls restart it. Bring your own copy of the map file.',
+  blurb: 'One long linear run, 5 checkpoints; falls restart it. Not hosted here: downloaded from its original upload (8 MB) the first time.',
   credit: { by: 'KSF (Kool Surf Federation)', source: 'https://steamcommunity.com/sharedfiles/filedetails/?id=523349084' },
   order: 0,
+  difficulty: { tier: 1, run: 36, sections: 1 },
   spawn: { pos: [0, 0, 0], yaw: 90 },
   brushes: [],
   route: routeOf(STATIONS) as [number, number, number, number][],

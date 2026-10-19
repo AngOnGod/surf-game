@@ -69,6 +69,7 @@ const map: MapDef = {
   blurb: 'A long winding linear run down the whole map, two mirrored routes, 6 checkpoints; falls restart it.',
   credit: { by: 'Arblarg', source: 'https://gamebanana.com/mods/122542', license: ['CC BY-NC-ND 4.0', 'https://creativecommons.org/licenses/by-nc-nd/4.0/'] },
   order: 0,
+  difficulty: { tier: 1, run: 49, sections: 1 },
   spawn: { pos: [0, 0, 0], yaw: 90 },
   brushes: [],
   start: { min: [-1056, -1000, 10080], max: [1056, -150, 10400] }, // the spawn platform

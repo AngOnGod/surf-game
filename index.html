@@ -31,10 +31,15 @@
   .map { display: flex; gap: 14px; align-items: center; width: 100%; text-align: left; padding: 12px 14px; margin: 0 0 8px; }
   .map div { flex: 1; } .map b { display: block; font-size: 15px; } .map span { color: var(--dim); font-size: 12px; }
   .map em { font-style: normal; font-variant-numeric: tabular-nums; color: var(--gold); white-space: nowrap; }
+  .map i { font-style: normal; }
+  .lvl { flex: none; width: 68px; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--c, var(--dim)); }
+  .bar { display: block; height: 6px; margin-top: 5px; background: linear-gradient(90deg, var(--c, rgba(243, 246, 250, .7)) var(--f), rgba(255, 255, 255, .14) 0); -webkit-mask: repeating-linear-gradient(90deg, #000 0 16%, transparent 0 21%); mask: repeating-linear-gradient(90deg, #000 0 16%, transparent 0 21%); }
+  .why { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-size: 11px; color: var(--dim); }
+  .why .bar { display: inline-block; width: 40px; height: 5px; margin: 0 0 1px 6px; }
   button, .button { font: inherit; color: var(--fg); background: rgba(255, 255, 255, .06); border: 1px solid var(--line); border-radius: 8px; padding: 9px 14px; cursor: pointer; }
   button:hover, .button:hover { background: rgba(108, 180, 255, .18); border-color: rgba(108, 180, 255, .5); }
   button.primary, .button.primary { background: var(--accent); color: #06101e; border-color: var(--accent); font-weight: 700; }
-  .panel a { color: var(--accent); } .credits { font-size: 12px; }
+  .panel a { color: var(--accent); } .credits, .note { font-size: 12px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
   .grid { display: grid; grid-template-columns: 1fr 120px; gap: 6px 12px; align-items: center; }
   .grid input[type=number], .grid input[type=text], .grid select, input.link { width: 100%; font: inherit; color: var(--fg); background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }

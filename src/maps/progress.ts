@@ -20,6 +20,7 @@ const map: MapDef = {
   blurb: 'A tutorial in four parts from a hub, each a few short sections; the parts chain into one run.',
   credit: { by: 'Xtra (DizzyHam) and Sam', source: 'https://gamebanana.com/mods/137868', license: ['CC BY-NC-ND 4.0', 'https://creativecommons.org/licenses/by-nc-nd/4.0/'] },
   order: 0,
+  difficulty: { tier: 2, run: 60, sections: 13 }, // falls: back to the section's start
   spawn: { pos: [0, 0, 0], yaw: 90 },
   brushes: [],
   bsp: {

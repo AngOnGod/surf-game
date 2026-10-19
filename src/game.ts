@@ -17,6 +17,7 @@ export type BrushDef =
 
 export interface MapDef {
   id: string; name: string; blurb?: string; order?: number;
+  difficulty?: { tier: number; run: number; sections: number }; // for the map list (see rate): tier (1 easiest; as rated on community surf servers unless noted, this game's estimate for its own maps), a fast run in seconds (their records, or the planned run), and how many sections a fall sends you back within (1: falls restart the run)
   spawn: Spawn;
   brushes: BrushDef[];
   start?: Box; end?: Box; // run zones; staged maps default to the first stage start / last stage end
@@ -29,7 +30,7 @@ export interface MapDef {
   routeFlags?: number[]; // per route point, for the autopilot (1: a launch must pass through this point, see makeBot)
   routeCorners?: boolean; // autopilot: a waypoint at a corner is passed at the bisector (tight, turning routes)
   world?: World; // prebuilt collision brushes (set by the loader)
-  bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string }; look?: boolean; textured?: RegExp }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): players pick their own copy (where to get it, the exact file the zones and route fit); look: drawn with its own materials, lighting and sky; textured: props (by model path) whose glowing faces are drawn with their own textures (signs: arrows, words)
+  bsp?: { url: string; apply: (b: Bsp) => Partial<MapDef>; own?: { get: string; sha256: string }; look?: boolean; textured?: RegExp }; // geometry/entities from a Source .bsp, loaded on demand; own: not shipped (no licence to share): downloaded from where its author published it (get: a zip) or picked by the player, and kept in the browser (sha256: the exact .bsp the zones and route fit); look: drawn with its own materials, lighting and sky; textured: props (by model path) whose glowing faces are drawn with their own textures (signs: arrows, words)
   credit?: { by: string; source: string; license?: [string, string] }; // third-party maps: author, where it's from, licence name + link
   trail?: { zone: Box; width: [number, number]; life: number; height: number }; // a sprite trail handed out in zone (Source env_spritetrail parented to you)
   namers?: (Box & { shape?: Shape; name: string; filter?: Filter })[]; // zones that set the player's targetname (for filtered triggers)
@@ -38,6 +39,16 @@ export interface MapDef {
   props?: Props; // an imported map's static props, drawn (the solid ones' hulls are among its brushes)
   look?: Look; // an imported map's own look (bsp.look): drawn in place of the flat colours
   settings?: Partial<Settings>; // movement settings the map sets itself (an imported map's spawn commands): they apply on it
+}
+
+// The map list's difficulty: one rating (1-5) from three parts, each 1-5: skill (the tier), length (a fast run, a step
+// per 20 s) and falls (how far back one sends you, a step per 12 s). Mostly the tier: length adds up to half a level,
+// falls up to one.
+export const LEVELS: [number, string, string][] = [[1.75, 'Beginner', '#4ade80'], [2.5, 'Easy', '#a3e635'], [3.25, 'Medium', '#fbbf24'], [4, 'Hard', '#fb923c'], [Infinity, 'Very hard', '#f87171']];
+export function rate({ tier, run, sections }: NonNullable<MapDef['difficulty']>) {
+  const step = (x: number) => Math.min(5, Math.max(1, x)), skill = step(tier), length = step(run / 20), falls = step(run / sections / 12);
+  const score = Math.min(5, skill + (length - 1) / 8 + (falls - 1) / 4), [, name, color] = LEVELS.find(([top]) => score < top)!;
+  return { score, name, color, skill, length, falls };
 }
 
 export const box = (pos: Vec, size: Vec, o: { yaw?: number; color?: number } = {}): BrushDef => ({ type: 'box', pos, size, ...o });

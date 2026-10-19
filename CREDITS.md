@@ -23,8 +23,8 @@ textures inside them included):
   (`public/maps/surf_progress_fix.bsp.gz`: that download's `surf_progress_fix.bsp`, gzip-compressed whole the same way,
   SHA-256 06587e6407580f14937c3743e84a4c08556886bdb4656880f349a8eba84d2231).
 
-Not included: **surf_aircontrol_ksf** (KSF; Steam Workshop item 523349084) comes with no licence to share it, so players
-load their own copy in the game.
+Not included: **surf_aircontrol_ksf** (KSF; Steam Workshop item 523349084) comes with no licence to share it, so it isn't
+hosted here: the game downloads it from its original upload (or players load their own copy) into their browser.
 
 The zones, autopilot lines, movement code and everything else here are this project's own. A free, non-commercial
 project, not affiliated with Valve or the map authors.

@@ -49,6 +49,7 @@ const map: MapDef = {
   name: 'Utopia-like',
   blurb: '7 sections of long two-sided ramps, big drops, gap jumps, two gate walls and a slot to thread. Beginner friendly.',
   order: 1,
+  difficulty: { tier: 1, run: 33, sections: 7 },
   spawn: c.spawn,
   brushes: c.brushes,
   start: c.start,

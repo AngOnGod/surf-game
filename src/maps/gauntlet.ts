@@ -3,7 +3,7 @@ import { type Piece, canyon, platform } from '../build';
 import { type Vec, hullPlanes } from '../physics';
 import { cos, sin } from '../fmath';
 
-// A hard original map: five stages of enclosed canyons. Each stage starts with a steep drop-in, then tests one
+// An original map: five stages of enclosed canyons. Each stage starts with a steep drop-in, then tests one
 // skill: a banked turn into a kicker gap, bobsled S-bends on the outer walls, 61° knife-edges with air switches and
 // a window to thread, a 180° descending corkscrew, and two long speed-check gaps. Falls restart the stage.
 // Ramps switch type (ridge <-> valley) only across a gap: run straight into a valley and the low half of the
@@ -65,8 +65,9 @@ ends.slice(0, -1).forEach(({ e, h }, i) => {
 return {
   id: 'gauntlet',
   name: 'Gauntlet',
-  blurb: 'Hard: 5 stages of enclosed canyons. Banked turns, wall switches, 62° knife-edges, a corkscrew and speed checks.',
+  blurb: '5 stages of enclosed canyons. Banked turns, wall switches, 62° knife-edges, a corkscrew and speed checks.',
   order: 1,
+  difficulty: { tier: 1, run: 77, sections: 5 },
   spawn: stages[0].spawn,
   brushes,
   stages,

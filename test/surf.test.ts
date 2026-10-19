@@ -1,15 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import {
   type Cmd, type Vec, DEFAULTS, HULL_MIN, HULL_STAND, NO_CMD, accelerate, airAccelerate, categorizePosition, clipVelocity,
   ctx, dot, friction, hlen, len, makeTris, newPlayer, playerMove, trace,
 } from '../src/physics';
-import { type MapDef, type Spawn, Session, buildBrush } from '../src/game';
+import { type MapDef, type Spawn, Session, buildBrush, rate } from '../src/game';
 import { makeBot } from '../src/bot';
 import { type Demo, replay, replayDemo } from '../src/plan';
 import { RUNS } from '../src/runs';
 import * as F from '../src/fmath';
-import { parseBsp, resolveMap } from '../src/bsp';
+import { parseBsp, resolveMap, unpack } from '../src/bsp';
 import testMap, { RAMP60 } from '../src/maps/test';
 
 const S = { ...DEFAULTS };
@@ -259,6 +260,27 @@ describe('maps', () => {
     expect(trace(s.world, o, o, HULL_MIN, HULL_STAND).startsolid).toBe(false);
     for (const st of def.stages ?? []) expect(trace(s.world, st.spawn.pos, st.spawn.pos, HULL_MIN, HULL_STAND).startsolid).toBe(false);
     for (const cp of def.checkpoints ?? []) if (cp.spawn) expect(trace(s.world, cp.spawn.pos, cp.spawn.pos, HULL_MIN, HULL_STAND).startsolid).toBe(false);
+  });
+  it('rate as the map list shows them: mostly the tier, then the length and how far back a fall sends you', () => {
+    expect(Object.fromEntries(mapDefs.filter(m => m.difficulty).map(m => [m.id, rate(m.difficulty!).name]))).toEqual({
+      utopia: 'Beginner', stages: 'Beginner', aircontrol: 'Beginner', gauntlet: 'Beginner',
+      kitsune: 'Easy', mesa: 'Easy', utopia_v3: 'Easy', progress: 'Easy', cyberwave: 'Medium',
+    });
+    expect(mapDefs.filter(m => !m.difficulty).map(m => m.id)).toEqual(['test']);
+  });
+  it('a map comes out of the zip it was published in', async () => {
+    const bsp = new TextEncoder().encode('VBSP'.repeat(500)), files: [string, Uint8Array, number][] = [['readme.txt', new TextEncoder().encode('hi'), 0], ['maps/x.bsp', deflateRawSync(bsp), 8]];
+    const local: Uint8Array[] = [], central: Uint8Array[] = [];
+    let at = 0;
+    for (const [name, data, method] of files) { // name, data (stored or deflated), compression method
+      const n = new TextEncoder().encode(name), h = new Uint8Array(30 + n.length), c = new Uint8Array(46 + n.length), hv = new DataView(h.buffer), cv = new DataView(c.buffer);
+      hv.setUint32(0, 0x04034b50, true); hv.setUint16(8, method, true); hv.setUint32(18, data.length, true); hv.setUint16(26, n.length, true); h.set(n, 30);
+      cv.setUint32(0, 0x02014b50, true); cv.setUint16(10, method, true); cv.setUint32(20, data.length, true); cv.setUint16(28, n.length, true); cv.setUint32(42, at, true); c.set(n, 46);
+      local.push(h, data); central.push(c); at += h.length + data.length;
+    }
+    const end = new Uint8Array(22), ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true); ev.setUint16(10, files.length, true); ev.setUint32(16, at, true);
+    expect(new Uint8Array(await unpack(new Uint8Array(Buffer.concat([...local, ...central, end])).buffer))).toEqual(bsp);
   });
 });
 

@@ -68,6 +68,7 @@ const map: MapDef = {
   blurb: 'Two long neon stages over a city, each with its own timer. The map sets max velocity 7500.',
   credit: { by: 'Mr.Cow', source: 'https://gamebanana.com/mods/82068', license: ['CC BY-NC-ND 4.0', 'https://creativecommons.org/licenses/by-nc-nd/4.0/'] },
   order: 0,
+  difficulty: { tier: 2, run: 58, sections: 2 },
   spawn: { pos: [0, 0, 0], yaw: 90 },
   brushes: [],
   route: routeOf(STATIONS) as [number, number, number, number][],

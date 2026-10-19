@@ -339,10 +339,21 @@ function hullOf({ pts, tris }: Model['hulls'][number]): [number, number, number,
   return out;
 }
 
-/** A map file as fetched: a gzipped copy (an original too big to host as it is, compressed whole) is unpacked. */
+/** A map file as fetched: a gzipped copy (an original too big to host as it is, compressed whole) is unpacked, and a zip
+ *  (a map as its author published it) gives up its .bsp. */
 export const unpack = async (buf: ArrayBuffer): Promise<ArrayBuffer> => {
-  const h = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
-  return h[0] === 0x1f && h[1] === 0x8b ? new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer() : buf;
+  const u8 = new Uint8Array(buf), dv = new DataView(buf), u16 = (o: number) => dv.getUint16(o, true), u32 = (o: number) => dv.getUint32(o, true);
+  const inflate = (b: Uint8Array<ArrayBuffer>, f: CompressionFormat) => new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream(f))).arrayBuffer();
+  if (u8[0] === 0x1f && u8[1] === 0x8b) return inflate(u8, 'gzip');
+  if (buf.byteLength < 22 || u32(0) !== 0x04034b50) return buf;
+  let e = buf.byteLength - 22; // the end record, then the central directory: each file's name, sizes and local header
+  while (e > 0 && u32(e) !== 0x06054b50) e--;
+  for (let p = u32(e + 16), n = u16(e + 10); n-- > 0; p += 46 + u16(p + 28) + u16(p + 30) + u16(p + 32)) {
+    if (!/\.bsp$/i.test(new TextDecoder().decode(u8.subarray(p + 46, p + 46 + u16(p + 28))))) continue;
+    const at = u32(p + 42), data = u8.subarray(at + 30 + u16(at + 26) + u16(at + 28)).subarray(0, u32(p + 20));
+    return u16(p + 10) === 8 ? inflate(data, 'deflate-raw') : data.slice().buffer;
+  }
+  throw new Error('no .bsp in the zip');
 };
 
 /** Load a map's .bsp (browser: fetch; tests pass their own reader) and merge it into the definition. */

@@ -1,11 +1,11 @@
 // Rendering, input, fixed-tick loop, HUD, menus. All movement lives in physics.ts; all rules in game.ts.
 import * as THREE from 'three';
 import { type Cmd, type Player, type Settings, type Vec, DEFAULTS, NO_CMD, hlen, len, viewVectors } from './physics';
-import { type Box, type GameEvent, type MapDef, Session } from './game';
+import { type Box, type GameEvent, type MapDef, Session, rate } from './game';
 import { makeBot } from './bot';
 import { BLOCK, type Demo, decode, replay } from './plan';
 import { RUNS } from './runs';
-import { resolveMap } from './bsp';
+import { resolveMap, unpack } from './bsp';
 import type { Look } from './look';
 import type { Image } from './vtf';
 
@@ -318,18 +318,18 @@ function saveDemo() {
 
 let loading = false, pick: MapDef | null = null; // pick: a map whose file the player has to supply
 const resolved = new Map<string, MapDef>();
-const mapCache = () => caches.open('surf-maps'); // map files players supplied themselves, kept in this browser only
+const mapCache = () => caches.open('surf-maps'); // maps that aren't shipped (downloaded, or supplied by the player), kept in this browser only
 async function readMap(url: string) {
   try { const hit = await (await mapCache()).match(url); if (hit) return hit.arrayBuffer(); } catch { /* no Cache API here */ }
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url} not found`);
+  if (!r.ok || r.headers.get('content-type')?.startsWith('text/html')) throw new Error(`${url} not found`); // (some servers answer with the page)
   return r.arrayBuffer();
 }
 async function load(def: MapDef) {
   loading = true;
   if (def.bsp && !resolved.has(def.id)) flash(`Loading ${def.name}…`, 60000);
   try {
-    const full = resolved.get(def.id) ?? await resolveMap(def, readMap);
+    const full = resolved.get(def.id) ?? await resolveMap(def, def.bsp?.own ? u => readMap(u).catch(() => download(def)) : readMap);
     resolved.set(def.id, full);
     session = new Session(full, settings);
     autopilot = null;
@@ -340,10 +340,21 @@ async function load(def: MapDef) {
     else flash(`Couldn't load ${def.name}: ${(e as Error).message}`, 6000);
   } finally { loading = false; }
 }
-async function supply(def: MapDef, file: File) { // the player's own copy of a map that isn't shipped
-  const buf = await file.arrayBuffer();
+const sha256 = async (b: ArrayBuffer) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map(x => x.toString(16).padStart(2, '0')).join('');
+async function download(def: MapDef) { // a map that isn't shipped, from where its author published it; kept in this browser
+  const own = def.bsp!.own!;
+  flash(`Downloading ${def.name} from its original upload…`, 60000);
+  const r = await fetch(own.get);
+  if (!r.ok) throw new Error(`its upload isn't there (${r.status})`);
+  const buf = await unpack(await r.arrayBuffer());
+  if (await sha256(buf).catch(() => own.sha256) !== own.sha256) throw new Error('its upload has changed');
+  try { await (await mapCache()).put(def.bsp!.url, new Response(buf)); } catch { /* not kept: downloaded again next time */ }
+  return buf;
+}
+async function supply(def: MapDef, file: File) { // the player's own copy of a map that isn't shipped (the .bsp, or the zip it came in)
+  const buf = await unpack(await file.arrayBuffer());
   let same = true;
-  try { same = [...new Uint8Array(await crypto.subtle.digest('SHA-256', buf))].map(b => b.toString(16).padStart(2, '0')).join('') === def.bsp!.own!.sha256; } catch { /* no SubtleCrypto */ }
+  try { same = await sha256(buf) === def.bsp!.own!.sha256; } catch { /* no SubtleCrypto */ }
   try { await (await mapCache()).put(def.bsp!.url, new Response(buf)); } catch { /* not kept: pick it again next time */ }
   resolved.set(def.id, await resolveMap(def, async () => buf));
   pick = null; show(null); lock(); await load(def);
@@ -556,6 +567,18 @@ const CONTROLS = [['Click', 'capture mouse'], ['W A S D', 'move / strafe'], ['Mo
   ['R', 'restart run'], ['C / V', 'save / load practice checkpoint (invalidates timer)'], ['N', 'noclip (Space/Ctrl up/down, Shift fast)'],
   ['P', 'autopilot demo'], ['E', 'save the last finished run as a file'], ['F3', 'debug overlay'], ['Esc', 'menu']];
 
+const bar = (v: number) => `<i class="bar" style="--f:${(v * 20).toFixed(1)}%"></i>`;
+function level(m: MapDef): [string, string] { // the map list's difficulty: a badge, and the rating's three parts
+  const d = m.difficulty;
+  if (!d) return [`<i class="lvl" title="Not rated">—</i>`, ''];
+  const r = rate(d), back = Math.round(d.run / d.sections), parts: [string, number, string][] = [
+    ['Skill', r.skill, `Tier ${d.tier}: how hard the surfing is (1 is the easiest)`],
+    ['Length', r.length, `A fast run takes about ${d.run} s`],
+    ['Falls', r.falls, d.sections > 1 ? `A fall sends you back to the start of your section (about ${back} s of a fast run)` : 'A fall sends you back to the start of the run'],
+  ];
+  return [`<i class="lvl" style="--c:${r.color}" title="Difficulty ${r.score.toFixed(1)} of 5">${r.name}${bar(r.score)}</i>`, `<i class="why">${parts.map(([l, v, t]) => `<i title="${t}">${l}${bar(v)}</i>`).join('')}</i>`];
+}
+
 function show(screen: Screen | null) {
   menuOpen = !!screen;
   $('menu').style.display = screen ? 'flex' : 'none';
@@ -564,13 +587,14 @@ function show(screen: Screen | null) {
   const panel = $('panel');
   if (screen === 'maps') {
     panel.innerHTML = `<h1>SURF</h1><p>Source-engine air strafing and ramp physics, ${settings.tickrate} tick.</p><h2>Maps</h2>` +
-      MAPS.map((m, i) => { const pb: PB = store.get(pbKey(m.id), {}); return `<button class="map" data-map="${i}"><div><b>${m.name}</b><span>${m.blurb ?? ''}</span></div><em>${pb.time !== undefined ? 'PB ' + fmt(pb.time) : ''}</em></button>`; }).join('') +
+      `<p class="note">Difficulty is mostly the map's skill tier (based on community surf servers' ratings), plus a little for a long run and for falls that send you far back.</p>` +
+      MAPS.map((m, i) => { const pb: PB = store.get(pbKey(m.id), {}), [badge, parts] = level(m); return `<button class="map" data-map="${i}">${badge}<div><b>${m.name}</b><span>${m.blurb ?? ''}</span>${parts}</div><em>${pb.time !== undefined ? 'PB ' + fmt(pb.time) : ''}</em></button>`; }).join('') +
       `<div class="row"><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div><h2>Controls</h2><div class="keys">${CONTROLS.map(([k, d]) => `<span><kbd>${k}</kbd></span><span>${d}</span>`).join('')}</div>` +
       `<h2>Credits</h2><p class="credits">${MAPS.filter(m => m.credit).map(({ name, credit: c }) => `<b>${name}</b> by ${c!.by}${c!.license ? `, <a href="${c!.license[1]}" target="_blank" rel="noopener">${c!.license[0]}</a>` : ''} · <a href="${c!.source}" target="_blank" rel="noopener">source</a>`).join('<br>')}<br>Maps are the authors' unmodified files; zones and autopilot lines are this game's own.</p>`;
   } else if (screen === 'pick') {
     const d = pick!;
-    panel.innerHTML = `<h1>${d.name}</h1><p>This map isn't hosted here (there's no licence to share it), so it needs your own copy: download <a href="${d.bsp!.own!.get}" target="_blank" rel="noopener">the map</a>, unzip it and choose the <b>.bsp</b>. It's kept in this browser for next time.</p>` +
-      `<div class="row"><label class="button primary">Choose the .bsp…<input type="file" accept=".bsp" data-pick hidden></label><button data-go="maps">Back</button></div>`;
+    panel.innerHTML = `<h1>${d.name}</h1><p>This map isn't hosted here (there's no licence to share it), and downloading it from its original upload didn't work just now. Download <a href="${d.bsp!.own!.get}" target="_blank" rel="noopener">the map</a> yourself and choose the file (the zip as it comes, or the <b>.bsp</b> in it). It's kept in this browser for next time.</p>` +
+      `<div class="row"><label class="button primary">Choose the map file…<input type="file" accept=".bsp,.zip" data-pick hidden></label><button data-go="maps">Back</button></div>`;
   } else if (screen === 'pause') {
     panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-go="maps">Maps</button><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div>`;
   } else if (screen === 'board') {
