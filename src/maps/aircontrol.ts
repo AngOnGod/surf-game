@@ -82,7 +82,8 @@ const map: MapDef = {
   routeOnSurface: true,
   bsp: {
     url: 'bsp/surf_aircontrol_ksf.bsp',
-    own: { get: 'https://cdn.steamusercontent.com/ugc/683776078263100640/71D28D0F6B4DB35FB68B70A12484D8DA80326EB3/', sha256: '463b5a80ec15f1ba46d7a46c22ca4758c3855d6e16210b94e53d551f2bbafc03' }, // the workshop upload (a zip)
+    sha256: '463b5a80ec15f1ba46d7a46c22ca4758c3855d6e16210b94e53d551f2bbafc03',
+    own: { get: 'https://cdn.steamusercontent.com/ugc/683776078263100640/71D28D0F6B4DB35FB68B70A12484D8DA80326EB3/' }, // the workshop upload (a zip)
     apply: b => {
       const zone = (name: string): Box => { const t = b.triggers.find(t => t.e.targetname === name)!; return { min: t.min, max: t.max }; };
       return {

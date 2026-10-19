@@ -22,8 +22,11 @@ textures inside them included):
   Licence: [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Source: https://gamebanana.com/mods/137868
   (`public/maps/surf_progress_fix.bsp.gz`: that download's `surf_progress_fix.bsp`, gzip-compressed whole the same way,
   SHA-256 06587e6407580f14937c3743e84a4c08556886bdb4656880f349a8eba84d2231).
+- **surf_aircontrol_v3** by David Hocking (SnooP).
+  Licence: [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Source: https://gamebanana.com/mods/121601
+  (`public/maps/surf_AirControl_v3.bsp`, from that download's archive; the author's readme also lets it be shared, with credit).
 
-Not included: **surf_aircontrol_ksf** (KSF; Steam Workshop item 523349084) comes with no licence to share it, so it isn't
+Not included: **surf_aircontrol_ksf** (KSF's rework of the map above; Steam Workshop item 523349084) comes with no licence to share it, so it isn't
 hosted here: the game downloads it from its original upload (or players load their own copy) into their browser.
 
 The zones, autopilot lines, movement code and everything else here are this project's own. A free, non-commercial

@@ -318,47 +318,55 @@ function saveDemo() {
 
 let loading = false, pick: MapDef | null = null; // pick: a map whose file the player has to supply
 const resolved = new Map<string, MapDef>();
-const mapCache = () => caches.open('surf-maps'); // maps that aren't shipped (downloaded, or supplied by the player), kept in this browser only
-async function readMap(url: string) {
-  try { const hit = await (await mapCache()).match(url); if (hit) return hit.arrayBuffer(); } catch { /* no Cache API here */ }
+// Map files are kept in this browser per version (the exact .bsp's SHA-256): each downloads once, and a changed map
+// replaces its old copy. (Cache Storage needs a secure context: elsewhere maps are fetched each time.)
+const mapCache = () => caches.open('surf-maps');
+const sha256 = async (b: ArrayBuffer) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map(x => x.toString(16).padStart(2, '0')).join('');
+async function fetchMap(url: string, label: string) { // showing progress
   const r = await fetch(url);
   if (!r.ok || r.headers.get('content-type')?.startsWith('text/html')) throw new Error(`${url} not found`); // (some servers answer with the page)
-  return r.arrayBuffer();
+  const size = +(r.headers.get('content-length') ?? 0), parts: Uint8Array<ArrayBuffer>[] = [], body = r.body!.getReader();
+  for (let got = 0, shown = 0; ;) {
+    const { done, value } = await body.read();
+    if (done) return new Blob(parts).arrayBuffer();
+    parts.push(value); got += value.length;
+    if (size && performance.now() - shown > 100) { shown = performance.now(); msgTick = -1; flash(`${label}… ${Math.min(99, Math.floor((100 * got) / size))}%`, 60000); }
+  }
 }
-async function load(def: MapDef) {
+async function readMap(def: MapDef, own?: ArrayBuffer) { // own: the player's copy of a map that isn't shipped
+  const b = def.bsp!, key = new URL(`${b.url}?v=${b.sha256.slice(0, 16)}`, location.href).href;
+  if (!own) try { const hit = await (await mapCache()).match(key); if (hit) return { buf: await hit.arrayBuffer(), exact: true }; } catch { /* no Cache API here */ }
+  const raw = own ?? await fetchMap(key, `Loading ${def.name}`).catch(e => {
+    if (!b.own) throw e;
+    return fetchMap(b.own.get, `Downloading ${def.name} from its original upload`); // not shipped: from where its author published it
+  });
+  const buf = await unpack(raw), exact = await sha256(buf).then(h => h === b.sha256, () => true); // (no SubtleCrypto: unchecked)
+  if (exact) try { // kept under this version; the map's other versions go
+    const c = await mapCache();
+    for (const r of await c.keys()) if (r.url.split('?')[0] === key.split('?')[0]) await c.delete(r);
+    await c.put(key, new Response(raw));
+  } catch { /* not kept (no Cache API, or no room): fetched again next time */ }
+  return { buf, exact };
+}
+async function load(def: MapDef, own?: ArrayBuffer) {
   loading = true;
   if (def.bsp && !resolved.has(def.id)) flash(`Loading ${def.name}…`, 60000);
+  let exact = true;
   try {
-    const full = resolved.get(def.id) ?? await resolveMap(def, def.bsp?.own ? u => readMap(u).catch(() => download(def)) : readMap);
+    const full = resolved.get(def.id) ?? await resolveMap(def, async () => { const m = await readMap(def, own); exact = m.exact; return m.buf; });
     resolved.set(def.id, full);
     session = new Session(full, settings);
     autopilot = null;
     buildScene(session);
-    if (def.bsp) { msgTick = -1; flash(def.name); }
+    if (def.bsp) { msgTick = -1; flash(exact ? def.name : `Not the exact ${def.name} file this was made for: zones and the autopilot may not line up`, exact ? undefined : 6000); }
   } catch (e) {
-    if (def.bsp?.own) { msgTick = -1; flash('', 0); pick = def; show('pick'); document.exitPointerLock(); }
+    if (def.bsp?.own && !own) { msgTick = -1; flash('', 0); pick = def; show('pick'); document.exitPointerLock(); }
     else flash(`Couldn't load ${def.name}: ${(e as Error).message}`, 6000);
   } finally { loading = false; }
 }
-const sha256 = async (b: ArrayBuffer) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map(x => x.toString(16).padStart(2, '0')).join('');
-async function download(def: MapDef) { // a map that isn't shipped, from where its author published it; kept in this browser
-  const own = def.bsp!.own!;
-  flash(`Downloading ${def.name} from its original upload…`, 60000);
-  const r = await fetch(own.get);
-  if (!r.ok) throw new Error(`its upload isn't there (${r.status})`);
-  const buf = await unpack(await r.arrayBuffer());
-  if (await sha256(buf).catch(() => own.sha256) !== own.sha256) throw new Error('its upload has changed');
-  try { await (await mapCache()).put(def.bsp!.url, new Response(buf)); } catch { /* not kept: downloaded again next time */ }
-  return buf;
-}
 async function supply(def: MapDef, file: File) { // the player's own copy of a map that isn't shipped (the .bsp, or the zip it came in)
-  const buf = await unpack(await file.arrayBuffer());
-  let same = true;
-  try { same = await sha256(buf) === def.bsp!.own!.sha256; } catch { /* no SubtleCrypto */ }
-  try { await (await mapCache()).put(def.bsp!.url, new Response(buf)); } catch { /* not kept: pick it again next time */ }
-  resolved.set(def.id, await resolveMap(def, async () => buf));
-  pick = null; show(null); lock(); await load(def);
-  if (!same) flash(`Not the exact ${def.name} file this was made for: zones and the autopilot may not line up`, 6000);
+  const own = await file.arrayBuffer();
+  pick = null; show(null); lock(); await load(def, own);
 }
 
 const requestLock = canvas.requestPointerLock.bind(canvas) as (o?: object) => Promise<void> | void;

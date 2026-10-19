@@ -25,6 +25,7 @@ const map: MapDef = {
   brushes: [],
   bsp: {
     url: 'maps/surf_progress_fix.bsp.gz',
+    sha256: '06587e6407580f14937c3743e84a4c08556886bdb4656880f349a8eba84d2231',
     textured: /\/signs\//, // its signs show their arrows and titles (in their textures)
     apply: b => {
       const zone = (name: string): Box => { const t = b.triggers.find(t => t.e.targetname === name)!; return hull({ min: t.min, max: t.max }); };

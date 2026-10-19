@@ -87,6 +87,7 @@ const map: MapDef = {
   routeOnSurface: true,
   bsp: {
     url: 'maps/surf_mesa.bsp',
+    sha256: '7328e453b2aaaf3c116e1bfb4d842ac3f09e6ce282a977b63fe4f0539e995d93',
     apply: b => ({ brushes: b.brushes, pushes: b.pushes, fails: b.fails, spawn: b.spawn }),
   },
 };

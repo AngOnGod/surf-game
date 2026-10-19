@@ -94,6 +94,7 @@ const map: MapDef = {
   routeOnSurface: true,
   bsp: {
     url: 'maps/surf_kitsune.bsp',
+    sha256: '1c0d3c7b3c08581180da3efc4512068b03023340ffd744eb0ab86c7ec214e77f',
     apply: b => {
       const dest = (name: string): Spawn => {
         const e = b.entities.find(e => e.classname === 'info_teleport_destination' && e.targetname?.toLowerCase() === name)!;

@@ -1,11 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { deflateRawSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   type Cmd, type Vec, DEFAULTS, HULL_MIN, HULL_STAND, NO_CMD, accelerate, airAccelerate, categorizePosition, clipVelocity,
   ctx, dot, friction, hlen, len, makeTris, newPlayer, playerMove, trace,
 } from '../src/physics';
-import { type MapDef, type Spawn, Session, buildBrush, rate } from '../src/game';
+import { type MapDef, type Spawn, Session, buildBrush, inside, rate } from '../src/game';
 import { makeBot } from '../src/bot';
 import { type Demo, replay, replayDemo } from '../src/plan';
 import { RUNS } from '../src/runs';
@@ -263,11 +264,15 @@ describe('maps', () => {
   });
   it('rate as the map list shows them: mostly the tier, then the length and how far back a fall sends you', () => {
     expect(Object.fromEntries(mapDefs.filter(m => m.difficulty).map(m => [m.id, rate(m.difficulty!).name]))).toEqual({
-      utopia: 'Beginner', stages: 'Beginner', aircontrol: 'Beginner', gauntlet: 'Beginner',
+      utopia: 'Beginner', stages: 'Beginner', aircontrol: 'Beginner', aircontrol_v3: 'Beginner', gauntlet: 'Beginner',
       kitsune: 'Easy', mesa: 'Easy', utopia_v3: 'Easy', progress: 'Easy', cyberwave: 'Medium',
     });
     expect(mapDefs.filter(m => !m.difficulty).map(m => m.id)).toEqual(['test']);
   });
+  it.each(mapDefs.filter(m => m.bsp && !m.bsp.own).map(m => [m.id, m.bsp!] as const))('%s is shipped as the exact file it names (its version)', async (_, b) => {
+    const raw = readFileSync(`public/${b.url}`), buf = await unpack(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
+    expect(createHash('sha256').update(new Uint8Array(buf)).digest('hex')).toBe(b.sha256);
+  }, 60_000);
   it('a map comes out of the zip it was published in', async () => {
     const bsp = new TextEncoder().encode('VBSP'.repeat(500)), files: [string, Uint8Array, number][] = [['readme.txt', new TextEncoder().encode('hi'), 0], ['maps/x.bsp', deflateRawSync(bsp), 8]];
     const local: Uint8Array[] = [], central: Uint8Array[] = [];
@@ -511,6 +516,22 @@ describe.skipIf(!existsSync(AIRCONTROL))('Source .bsp import (surf_aircontrol_ks
       expect(res, `parity ${par}`).toBe('ok');
     }
   }, 240_000);
+});
+
+describe('Source .bsp import (surf_aircontrol_v3, CS:S v19)', () => {
+  it('spawns on the ground in its start room; leaving starts the run, a fall sends you back, the end room finishes it', async () => {
+    const def = await resolveMap(mapDefs.find(m => m.id === 'aircontrol_v3')!, async () => { const b = readFileSync('public/maps/surf_AirControl_v3.bsp'); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
+    const s = new Session(def, S), run = (fwd: number, ticks: number) => { const seen: string[] = []; for (let i = 0; i < ticks; i++) { s.step({ ...NO_CMD, fwd }); seen.push(...s.events.splice(0).map(e => e.type)); } return seen; };
+    run(0, 64);
+    expect([s.p.onGround, inside(s.p.origin, def.start!)]).toEqual([true, true]);
+    expect(run(1, 256)).toContain('start'); // out of the start room the way it faces
+    s.p.origin = [-1800, -7000, 12900]; // into the kill floor under the first ramps
+    expect(run(0, 2)).toContain('fail');
+    expect(inside(s.p.origin, def.start!)).toBe(true);
+    run(1, 256);
+    s.p.origin = [12160, 3072, -14390]; // the end room, where the original's weapons wait
+    expect(run(0, 2)).toContain('finish');
+  }, 60_000);
 });
 
 const MESA = 'public/maps/surf_mesa.bsp';

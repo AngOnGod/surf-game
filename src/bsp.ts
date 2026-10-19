@@ -39,7 +39,7 @@ export interface Terrain { pos: Float32Array; nrm: Float32Array; col: Float32Arr
 
 const vec = (s = '0 0 0') => s.trim().split(/\s+/).map(Number) as Vec;
 
-export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean; textured?: RegExp } = {}): Bsp {
+export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean; textured?: RegExp; lift?: number } = {}): Bsp {
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   if (dv.getUint32(0, true) !== 0x50534256) throw new Error('not a VBSP file');
   const version = dv.getInt32(4, true);
@@ -51,7 +51,7 @@ export function parseBsp(buf: ArrayBuffer, opts: { look?: boolean; textured?: Re
   const P = lump(1), planes = [...Array(P.len / 20).keys()].map(i => { const o = P.ofs + i * 20; return [f32(o), f32(o + 4), f32(o + 8), f32(o + 12)]; });
   const TI = lump(6), TD = lump(2), SD = lump(43), ST = lump(44);
   const texName = (td: number) => { let o = SD.ofs + i32(ST.ofs + 4 * i32(TD.ofs + td * 32 + 12)), s = ''; while (u8[o]) s += String.fromCharCode(u8[o++]); return s; };
-  const srgb = (c: number) => Math.round(255 * Math.min(1, Math.max(0, c)) ** (1 / 2.2));
+  const srgb = (c: number) => Math.round(255 * Math.min(1, Math.max(0, c)) ** ((opts.lift ?? 1) / 2.2)); // lift: see MapDef.bsp
   const faceColor = new Map<number, number | null>(); // texinfo -> colour, or null = not drawn
   const colorOf = (ti: number) => {
     if (ti < 0) return null;
@@ -361,7 +361,7 @@ export async function resolveMap(def: MapDef, read: (url: string) => Promise<Arr
   if (!r.ok) throw new Error(`${u} not found`);
   return r.arrayBuffer();
 })): Promise<MapDef> {
-  const b = def.bsp && parseBsp(await unpack(await read(def.bsp.url)), { look: def.bsp.look, textured: def.bsp.textured }), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain, tris: b.tris, props: b.props, look: b.look, settings: { ...b.settings, ...def.settings } } : def;
+  const b = def.bsp && parseBsp(await unpack(await read(def.bsp.url)), { look: def.bsp.look, textured: def.bsp.textured, lift: def.bsp.lift }), full = b ? { ...def, ...def.bsp!.apply(b), terrain: b.terrain, tris: b.tris, props: b.props, look: b.look, settings: { ...b.settings, ...def.settings } } : def;
   if (!full.routeOnSurface || !full.route) return full;
   const world = buildWorld(full);
   return { ...full, world, route: ridingLine(world, full.route) };

@@ -74,6 +74,7 @@ const map: MapDef = {
   routeOnSurface: true,
   bsp: {
     url: 'maps/surf_utopia_v3.bsp',
+    sha256: '47149322ee65e0d4f8a3216cf8eb631ecc84406c0d96b45857228a33b012341e',
     apply: b => ({
       brushes: b.brushes,
       pushes: b.pushes,

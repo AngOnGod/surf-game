@@ -76,6 +76,7 @@ const map: MapDef = {
   routeOnSurface: true,
   bsp: {
     url: 'maps/surf_cyberwave.bsp.gz',
+    sha256: '6f7c04f2899c409f0f88bd8aca7bd8ab3a182243364ba1c70af3017538e06e66',
     look: true, // drawn as it is: its neon, textures, lighting and sky
     apply: b => {
       const zone = (name: string): Box => { const t = b.triggers.filter(t => t.e.targetname === name); return hull({ min: [0, 1, 2].map(k => Math.min(...t.map(x => x.min[k]))) as Vec, max: [0, 1, 2].map(k => Math.max(...t.map(x => x.max[k]))) as Vec }); };
