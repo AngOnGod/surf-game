@@ -6,7 +6,7 @@
 // --remote --file=schema.sql). Local: npx wrangler dev (a local D1; ADMIN_KEY from .dev.vars).
 
 /** The maps on the board and their fast runs in seconds (MapDef.difficulty.run; the tests keep them in step). */
-export const RUNS: Record<string, number> = { aircontrol: 36, aircontrol_v3: 36, cyberwave: 58, gauntlet: 77, kitsune: 59, mesa: 49, progress: 60, stages: 52, utopia: 33, utopia_v3: 54 };
+export const RUNS: Record<string, number> = { aircontrol: 36, aircontrol_v3: 36, beginner: 45, cyberwave: 58, gauntlet: 77, kitsune: 59, mesa: 49, progress: 60, stages: 52, utopia: 33, utopia_v3: 54 };
 
 interface Stmt { bind(...v: unknown[]): Stmt; first<T = Row>(): Promise<T | null>; all<T = Row>(): Promise<{ results: T[] }>; run(): Promise<unknown> }
 interface Env { DB: { prepare(sql: string): Stmt; batch(s: Stmt[]): Promise<unknown> }; ADMIN_KEY?: string }

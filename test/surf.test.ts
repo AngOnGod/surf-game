@@ -266,7 +266,7 @@ describe('maps', () => {
   });
   it('rate as the map list shows them: mostly the tier, then the length and how far back a fall sends you', () => {
     expect(Object.fromEntries(mapDefs.filter(m => m.difficulty).map(m => [m.id, rate(m.difficulty!).name]))).toEqual({
-      utopia: 'Beginner', stages: 'Beginner', aircontrol: 'Beginner', aircontrol_v3: 'Beginner', gauntlet: 'Beginner',
+      utopia: 'Beginner', stages: 'Beginner', aircontrol: 'Beginner', aircontrol_v3: 'Beginner', gauntlet: 'Beginner', beginner: 'Beginner',
       kitsune: 'Easy', mesa: 'Easy', utopia_v3: 'Easy', progress: 'Easy', cyberwave: 'Medium',
     });
     expect(mapDefs.filter(m => !m.difficulty).map(m => m.id)).toEqual(['test']);
@@ -536,6 +536,46 @@ describe('Source .bsp import (surf_aircontrol_v3, CS:S v19)', () => {
   }, 60_000);
 });
 
+const BEGINNER = 'public/maps/surf_beginner.bsp';
+describe.skipIf(!existsSync(BEGINNER))('Source .bsp import (surf_beginner)', () => {
+  const read = async () => { const b = readFileSync(BEGINNER); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
+  const load = () => resolveMap(mapDefs.find(m => m.id === 'beginner')!, read);
+  it('seven stages: a fall goes back to the stage\'s platform, its portal ends it and readies the next, the last one finishes the run', async () => {
+    const def = await load(), st = def.stages!;
+    expect(st.map(x => x.name)).toEqual([1, 2, 3, 4, 5, 6, 7].map(i => `Stage ${i}`));
+    st.forEach((x, i) => {
+      expect(inside(x.spawn.pos, x.start) && def.fails!.some(f => !f.quiet && f.to && inside(f.to.pos, x.start)), x.name).toBe(true);
+      const exits = def.fails!.filter(f => f.quiet && f.to && inside(f.to.pos, x.end));
+      expect(exits.length, x.name).toBe(i === 1 ? 2 : 1); // stage 2's cross ramp has a portal at either end
+      for (const ex of exits) {
+        const s = new Session(def, S);
+        s.stage = { index: i, state: 'running', time: 5, splits: [], practice: false };
+        s.run = { state: 'running', time: 30, splits: [], practice: false };
+        s.p.origin = [(ex.min[0] + ex.max[0]) / 2, (ex.min[1] + ex.max[1]) / 2, ex.min[2] + 8];
+        s.step(NO_CMD);
+        const ev = s.events.splice(0).map(e => e.type);
+        expect([ev.includes('stage'), i < 6 ? s.stage.index === i + 1 && s.stage.state === 'ready' : ev.includes('finish')], x.name).toEqual([true, true]);
+      }
+    });
+  }, 60_000);
+  // the autopilot's line is verified for stages 1-4 at 256 tick (the rest of the map is imported and playable: no line yet)
+  it('autopilot finishes stages 1-4 at 256 tick, each from standing and in one go from the start (either tick parity)', async () => {
+    const def = await load();
+    for (const k of [1, 2, 3, 4, 0]) for (const par of [0, 1]) { // 0: from the start, carrying speed through the portals
+      const s = new Session(def, { ...S, tickrate: 256 }), bot = makeBot(def.route!, s.world, s.s, undefined, true, { flags: def.routeFlags, hazard: s.hazard, bisect: def.routeCorners });
+      if (k) s.respawn(def.stages![k - 1].spawn);
+      if (par) s.step(NO_CMD);
+      const done: number[] = [];
+      let fell = false;
+      for (let i = 0; i < 256 * 40 && !fell && done.length < (k ? 1 : 4); i++) {
+        s.step(bot(s.p));
+        for (const e of s.events.splice(0)) { if (e.type === 'fail') fell = true; if (e.type === 'stage') done.push(e.index + 1); }
+      }
+      expect(done, `${k ? `stage ${k}` : 'from the start'} parity ${par}`).toEqual(k ? [k] : [1, 2, 3, 4]);
+    }
+  }, 240_000);
+});
+
 const MESA = 'public/maps/surf_mesa.bsp';
 describe.skipIf(!existsSync(MESA))('Source .bsp import (surf_mesa)', () => {
   const read = async () => { const b = readFileSync(MESA); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); };
@@ -644,17 +684,18 @@ describe.skipIf(!existsSync(PROGRESS))('Source .bsp import (surf_progress, gzipp
   }, 60_000);
 });
 
-// planned runs replay exactly: from a fresh start, the stored moves finish in the stored time, without a fall
+// planned runs replay exactly: from a fresh start, the stored moves finish (a run of the first stages: get through its
+// last one) in the stored time, without a fall
 describe('planned autopilot runs', () => {
   for (const [key, { run, time, stage }] of Object.entries(RUNS)) {
     const [id, tick] = key.split('@'), m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);
-    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the planned run finishes ${stage === undefined ? '' : `stage ${stage + 1} `}in ${time.toFixed(3)}`, async () => {
+    it.skipIf(m.bsp && !file)(`${m.name} at ${tick} tick: the planned run ${stage === undefined ? 'finishes' : `gets through stage ${stage + 1}`} in ${time.toFixed(3)}`, async () => {
       const def = await resolveMap(m, async () => { const b = readFileSync(file!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
       const s = new Session(def, { ...S, tickrate: +tick }), bot = replay(run, +tick, makeBot(def.route ?? [], s.world, s.s, undefined, !!def.routeOnSurface, { flags: def.routeFlags, hazard: s.hazard, bisect: def.routeCorners }));
       let t = -1;
       for (let i = 0; i < +tick * (time + 5) && t < 0; i++) {
         s.step(bot(s.p));
-        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if ((e.type === 'finish' && stage === undefined) || (e.type === 'stage' && e.index === stage)) t = e.time; }
+        for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if ((e.type === 'finish' && stage === undefined) || (e.type === 'stage' && e.index === stage)) t = e.type === 'stage' ? s.run.time : e.time; }
       }
       expect(t).toBe(time);
     }, 120_000);

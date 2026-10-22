@@ -37,7 +37,7 @@ type Snap = { p: Session['p']; run: Session['run']; stage: Session['stage']; sec
 interface Node { snap: Snap; j: number; v: number; prog: number; cell: string; parent: Node | null; m: number; g: number; bot?: unknown; pure?: boolean }
 it('beam', async () => {
   const tick = +(process.env.TICK ?? 128), W = +(process.env.W ?? 100), K = +(process.env.K ?? 2), E = +(process.env.E ?? 0.5), L = +(process.env.L ?? 300), U = +(process.env.U ?? 1500), R = +(process.env.R ?? 1500), tag = process.env.TAG ?? `${m.id}@${tick}`, LOG = `scratch/beam-${tag}.log`;
-  const def = await resolveMap(m, async () => { const b = readFileSync(['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync)!); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
+  const def = await resolveMap(m, async () => { const b = readFileSync(process.env.BSP ?? ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync)!); /* BSP=path: a map file kept elsewhere */ return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
   const world = def.world ?? buildWorld(def);
   let guide = (def.route ?? []).map(q => [q[0], q[1], q[2]] as Vec), band: [number, number][] = guide.map(() => [+(process.env.A ?? 2), +(process.env.T ?? 150)]), free: boolean[] = guide.map(() => false);
   if (process.env.TAIL) {

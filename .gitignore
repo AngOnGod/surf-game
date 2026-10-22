@@ -31,3 +31,4 @@ scratch/mesa-way*
 server/node_modules
 server/.wrangler
 server/.dev.vars
+scratch/*-tail.json

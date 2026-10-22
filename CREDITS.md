@@ -25,6 +25,9 @@ textures inside them included):
 - **surf_aircontrol_v3** by David Hocking (SnooP).
   Licence: [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Source: https://gamebanana.com/mods/121601
   (`public/maps/surf_AirControl_v3.bsp`, from that download's archive; the author's readme also lets it be shared, with credit).
+- **surf_beginner** by Kiiru (testing: BOAT, Hellraisedsurfer; thanks: BalaTheShark).
+  Licence: [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/). Source: https://gamebanana.com/mods/121714
+  (`public/maps/surf_beginner.bsp`, from that download's archive).
 
 Not included: **surf_aircontrol_ksf** (KSF's rework of the map above; Steam Workshop item 523349084) comes with no licence to share it, so it isn't
 hosted here: the game downloads it from its original upload (or players load their own copy) into their browser.

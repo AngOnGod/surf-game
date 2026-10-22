@@ -431,7 +431,7 @@ function startAutopilot() { // a planned run if there is one for this map and ti
     let left = (decode(planned.run).length * settings.tickrate) / BLOCK;
     autopilot = p => { if (left-- > 0) return run(p); autopilot = null; flash('Autopilot: its run ends here, over to you (R restarts)', 4000); return readCmd(); };
   }
-  flash(planned ? `Autopilot: its planned run${planned.stage === undefined ? '' : ` of stage ${planned.stage + 1}`}, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
+  flash(planned ? `Autopilot: its planned run${planned.stage === undefined ? '' : ` through stage ${planned.stage + 1}`}, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }
 
