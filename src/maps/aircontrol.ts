@@ -10,7 +10,11 @@ import { type Box, type MapDef, type Station, routeOf } from '../game';
 /** Autopilot line (see Station): s = the section (0 = start to cp1, ..., 5 = cp5 to the end). Riding heights and the
  *  in-air points were tuned by search, section by section (scratch/acopt). Verified start to finish at 128 tick from
  *  either tick parity (test/); at 64 tick it passes the first checkpoint, then comes off leg 2 too wide to land on
- *  leg 3's first ramp (half the air-strafe authority per second), so 64 tick is unverified past there. */
+ *  leg 3's first ramp (half the air-strafe authority per second), so 64 tick is unverified past there. Along this
+ *  line, 256 tick falls: there the autopilot is a planned run (src/runs.ts) searched along the player's own run instead
+ *  (test/runs/aircontrol@256.json, 53.699: mostly in the air, often a lane over from this line). Its stations (by
+ *  scratch/demoguide.test.ts) went to the planner as a line of their own (GUIDE=scratch/ac-recline.json, NOBOT=1), so the
+ *  run doesn't use this line. */
 export const STATIONS: Station[] = [
   { s: 0, g: [[-1500, -9150, 14300]], h: [-1, -1] }, // walk off the start room's front edge
   { s: 0, g: [[-1502, -9172, 14143], [-1470, -8660, 14098], [-1438, -8148, 14052], [-1438, -7636, 13970], [-1438, -7508, 13949]], h: [0.7, 0.92] },

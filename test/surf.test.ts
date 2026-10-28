@@ -721,7 +721,7 @@ describe('ghost', () => {
 
 // the player's recorded runs (test/runs/, saved in-game with E) replay exactly: from their snapshot, the stored view and
 // keys finish in the stored time, without a fall (any change to the movement code that moves a human's line shows up here)
-const DEMOS: Record<string, number> = { 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875, 'cyberwave@256-s1': 33.23046875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
+const DEMOS: Record<string, number> = { 'aircontrol@256': 53.69921875, 'utopia_v3@128': 65.3515625, 'kitsune@128-s5': 7.1171875, 'cyberwave@256-s1': 33.23046875 }; // <map>@<tick>[-s<stage>]: the run's (or that stage's) time
 describe('recorded runs', () => {
   for (const [key, time] of Object.entries(DEMOS)) {
     const [, id, tick, stage] = key.match(/^(.*)@(\d+)(?:-s(\d+))?$/)!, m = mapDefs.find(d => d.id === id)!, file = m.bsp && ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync);

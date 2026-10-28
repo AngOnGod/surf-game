@@ -13,7 +13,7 @@
 // (no steering) is traced 1.25 s ahead: its first impact costs C * the energy the hit takes ((v·n)², none for a landing
 // along a face), an arc into a kill volume costs a fall; both weighted down with time, as steering can still change them. The beam keeps at most K states per cell of (guide segment, side offset, height off the guide, speed),
 // so lines that ride higher or wider survive alongside the greedy ones (cells: 128-unit position bins, speed bins).
-// MAP=, TICK=, W=, E=, R= (TAG= names the log/run files, to run two searches of one map at once); guide: the map's route, or cut where TAIL (json points) begins and continued along it.
+// MAP=, TICK=, W=, E=, R= (TAG= names the log/run files, to run two searches of one map at once); guide: the map's route (GUIDE=json points: another line, e.g. one that suits another tick rate; with NOBOT=1 the run doesn't use the map's route), or cut where TAIL (json points) begins and continued along it.
 // CAP=x0,y0,z0,x1,y1,z1,v: inside that box, speed over v costs 2 per u/s (a launch that must not be too fast).
 // GATES=x0,y0,z0,x1,y1,z1;...: boxes to pass in order; until the last, the score is energy + G per gate passed - GW *
 // the distance to the next gate (tight sections where speed is the whole game); past the last, the usual score. PW: weight of progress against energy (default 1; low values hoard speed through tight sections).
@@ -39,7 +39,7 @@ it('beam', async () => {
   const tick = +(process.env.TICK ?? 128), W = +(process.env.W ?? 100), K = +(process.env.K ?? 2), E = +(process.env.E ?? 0.5), L = +(process.env.L ?? 300), U = +(process.env.U ?? 1500), R = +(process.env.R ?? 1500), tag = process.env.TAG ?? `${m.id}@${tick}`, LOG = `scratch/beam-${tag}.log`;
   const def = await resolveMap(m, async () => { const b = readFileSync(process.env.BSP ?? ['public/maps/', 'public/bsp/'].map(d => d + m.bsp!.url.split('/').pop()).find(existsSync)!); /* BSP=path: a map file kept elsewhere */ return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); });
   const world = def.world ?? buildWorld(def);
-  let guide = (def.route ?? []).map(q => [q[0], q[1], q[2]] as Vec), band: [number, number][] = guide.map(() => [+(process.env.A ?? 2), +(process.env.T ?? 150)]), free: boolean[] = guide.map(() => false);
+  let guide = (process.env.GUIDE ? JSON.parse(readFileSync(process.env.GUIDE, 'utf8')) as Vec[] : def.route ?? []).map(q => [q[0], q[1], q[2]] as Vec), band: [number, number][] = guide.map(() => [+(process.env.A ?? 2), +(process.env.T ?? 150)]), free: boolean[] = guide.map(() => false);
   if (process.env.TAIL) {
     const tail: Vec[] = JSON.parse(readFileSync(process.env.TAIL, 'utf8')), d = (q: Vec) => Math.hypot(q[0] - tail[0][0], q[1] - tail[0][1], q[2] - tail[0][2]);
     const cut = guide.reduce((b, q, i) => (d(q) < d(guide[b]) ? i : b), 0);

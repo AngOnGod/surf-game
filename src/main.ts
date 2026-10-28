@@ -709,7 +709,7 @@ function show(screen: Screen | null) {
       NUMS.map(([k, l, st]) => `<label>${l}</label><input type="number" step="${st}" data-k="${k}" value="${+(settings[k] as number).toFixed(4)}">`).join('') +
       BOOLS.map(([k, l]) => `<label>${l}</label><input type="checkbox" data-k="${k}" ${settings[k] ? 'checked' : ''}>`).join('') +
       `</div><p>Times only save with the movement settings at their defaults, as on a server (custom runs say so); each tick rate keeps its own times, and the leaderboard has 256 and 128 tick ones (64 tick times stay on this device). ` +
-      `At 256 tick the autopilot finishes surf_utopia_v3, surf_mesa, Gauntlet, Utopia-like and Four Stages, and surf_cyberwave's first stage; surf_aircontrol_ksf's finishes at 128 only.</p>` +
+      `At 256 tick the autopilot finishes surf_utopia_v3, surf_mesa, Gauntlet, Utopia-like, Four Stages and surf_aircontrol_ksf (which it also finishes at 128), and surf_cyberwave's first stage.</p>` +
       boardSettings() + `<div class="row"><button class="primary" data-go="${backTo}">Back</button><button data-act="defaults">Reset to defaults</button></div>`;
     note = '';
     (panel.querySelector('select') as HTMLSelectElement).value = String(settings.tickrate);
