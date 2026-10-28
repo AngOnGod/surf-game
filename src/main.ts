@@ -2,9 +2,8 @@
 import * as THREE from 'three';
 import { type Cmd, type Player, type Settings, type Vec, DEFAULTS, NO_CMD, hlen, len, viewVectors } from './physics';
 import { type Box, type GameEvent, type MapDef, Session, rate } from './game';
-import { makeBot } from './bot';
-import { BLOCK, type Demo, decode, replay } from './plan';
-import { RUNS } from './runs';
+import type { Demo } from './plan';
+import { type Ghost, POSE, ghost as ghostOf, pilot } from './ghost';
 import { resolveMap, unpack } from './bsp';
 import * as online from './online';
 import type { Look } from './look';
@@ -289,6 +288,50 @@ function drawTrail(o: number[], now: number) {
   trailGeo.attributes.position.needsUpdate = trailGeo.attributes.color.needsUpdate = true;
 }
 
+// ---------------------------------------------------------------- the ghost's figure: see-through, brighter at its edges
+const ghostMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, uniforms: { alpha: { value: 1 } },
+  vertexShader: 'varying vec3 vN, vV; void main() { vec4 v = modelViewMatrix * vec4(position, 1.); vN = normalMatrix * normal; vV = -v.xyz; gl_Position = projectionMatrix * v; }',
+  fragmentShader: 'uniform float alpha; varying vec3 vN, vV; void main() { float r = 1. - abs(dot(normalize(vN), normalize(vV))); gl_FragColor = vec4(mix(vec3(.45, .8, 1.), vec3(1.), r), alpha * (.22 + .7 * r * r)); }',
+});
+const ghostFig = new THREE.Group(); // the player's hull: 32 wide, 72 tall (54 ducked); faces +x at yaw 0
+for (const [geo, x, z] of [[new THREE.CapsuleGeometry(14, 30, 4, 12).rotateX(Math.PI / 2), 0, 29], [new THREE.SphereGeometry(10, 16, 10), 0, 62], [new THREE.BoxGeometry(5, 14, 5), 9, 64]] as const) {
+  const m = new THREE.Mesh(geo, ghostMat);
+  m.position.set(x, 0, z);
+  ghostFig.add(m);
+}
+const GN = 64, gPos = new Float32Array(GN * 2 * 3), gCol = new Float32Array(GN * 2 * 4), gGeo = new THREE.BufferGeometry(); // its trail: the last 2 s
+gGeo.setAttribute('position', new THREE.BufferAttribute(gPos, 3).setUsage(THREE.DynamicDrawUsage));
+gGeo.setAttribute('color', new THREE.BufferAttribute(gCol, 4).setUsage(THREE.DynamicDrawUsage));
+gGeo.setIndex([...Array(GN - 1).keys()].flatMap(i => [2 * i, 2 * i + 1, 2 * i + 2, 2 * i + 1, 2 * i + 3, 2 * i + 2]));
+const ghostTrail = new THREE.Mesh(gGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+ghostTrail.frustumCulled = false;
+scene.add(ghostFig, ghostTrail);
+function drawGhost(t: number) { // t: how far between its last two poses, as you are between yours
+  const g = ghost, on = !!g && settings.ghost && !autopilot && gi >= 0 && (gi < g.n || !g.done);
+  ghostFig.visible = on;
+  ghostTrail.visible = on && gGo; // (waiting: no trail back to where it spawned)
+  if (!on) return;
+  const a = g.at, last = g.n - 1, i = Math.min(gi, last), pose = (k: number) => new THREE.Vector3(a[k * POSE], a[k * POSE + 1], a[k * POSE + 2] + 36);
+  const prev = pose(gGo ? Math.max(0, Math.min(gi - 1, last)) : i), at = pose(i), p = prev.distanceTo(at) > 300 ? at : prev.lerp(at, t); // (teleported: no in-between)
+  ghostFig.position.set(p.x, p.y, p.z - 36);
+  ghostFig.rotation.z = (a[i * POSE + 3] * Math.PI) / 180;
+  ghostFig.scale.z = a[i * POSE + 4] ? 54 / 72 : 1;
+  const near = Math.min(1, Math.max(0, (camera.position.distanceTo(p) - 40) / 160)); // faded right by the eye
+  ghostMat.uniforms.alpha.value = near;
+  const pts = [p], step = Math.max(1, Math.round(settings.tickrate / 32));
+  for (let k = i - step; k >= 0 && pts.length < GN; k -= step) { const q = pose(k); if (q.distanceTo(pts.at(-1)!) > 300) break; pts.push(q); }
+  const side = new THREE.Vector3(), dir = new THREE.Vector3(), toCam = new THREE.Vector3();
+  pts.forEach((q, m) => {
+    dir.subVectors(pts[Math.max(0, m - 1)], pts[Math.min(pts.length - 1, m + 1)]);
+    side.crossVectors(dir, toCam.subVectors(camera.position, q)).normalize().multiplyScalar(3 * (1 - m / GN / 2));
+    const alpha = 0.6 * (1 - m / GN) * Math.min(1, Math.max(0, (toCam.length() - 24) / 72));
+    for (const e of [0, 1]) { gPos.set([q.x + side.x * (e ? 1 : -1), q.y + side.y * (e ? 1 : -1), q.z + side.z * (e ? 1 : -1)], (m * 2 + e) * 3); gCol.set([0.55, 0.85, 1, alpha], (m * 2 + e) * 4); }
+  });
+  gGeo.setDrawRange(0, Math.max(0, pts.length - 1) * 6);
+  gGeo.attributes.position.needsUpdate = gGeo.attributes.color.needsUpdate = true;
+}
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
@@ -360,6 +403,7 @@ async function load(def: MapDef, own?: ArrayBuffer) {
     resolved.set(def.id, full);
     session = new Session(full, settings);
     autopilot = null;
+    ghostKey = '';
     buildScene(session);
     if (def.bsp) { msgTick = -1; flash(exact ? def.name : `Not the exact ${def.name} file this was made for: zones and the autopilot may not line up`, exact ? undefined : 6000); }
   } catch (e) {
@@ -397,6 +441,7 @@ addEventListener('keydown', e => {
   else if (e.code === 'KeyN') { session.toggleNoclip(); session.p.noclip ? (rec = null) : record(); }
   else if (e.code === 'KeyP') autopilot ? stopAutopilot() : startAutopilot();
   else if (e.code === 'KeyE') saveDemo();
+  else if (e.code === 'KeyG') toggleGhost();
   else if (e.code === 'F3') debug = !debug;
 });
 addEventListener('keyup', e => keys.delete(e.code));
@@ -419,21 +464,46 @@ function readCmd(): Cmd {
 }
 
 function startAutopilot() { // a planned run if there is one for this map and tick rate (standard settings only), else the route follower
-  const planned = custom() ? undefined : RUNS[`${session.def.id}@${settings.tickrate}`], r = session.def.route;
-  if (!planned && !r) return flash('This map has no autopilot route');
+  const a = pilot(session, !custom()), planned = a?.planned;
+  if (!a) return flash('This map has no autopilot route');
   session.restart();
   session.assisted = true;
   rec = null;
-  const routeBot = (settle: boolean) => makeBot(r ?? [], session.world, session.s, undefined, !!session.def.routeOnSurface, { flags: session.def.routeFlags, hazard: session.hazard, bisect: session.def.routeCorners, settle });
-  autopilot = planned ? replay(planned.run, settings.tickrate, routeBot(false)) : routeBot(true); // (planned runs hand some blocks to it)
+  autopilot = a.drive;
   if (planned?.stage !== undefined) { // a run of the first stages: done with its moves, it hands back (just through the stage's exit)
     const run = autopilot;
-    let left = (decode(planned.run).length * settings.tickrate) / BLOCK;
+    let left = a.left;
     autopilot = p => { if (left-- > 0) return run(p); autopilot = null; flash('Autopilot: its run ends here, over to you (R restarts)', 4000); return readCmd(); };
   }
   flash(planned ? `Autopilot: its planned run${planned.stage === undefined ? '' : ` through stage ${planned.stage + 1}`}, ${fmt(planned.time)} (P to stop)` : 'Autopilot demo (P to stop) · runs are not saved');
 }
 function stopAutopilot() { autopilot = null; session.restart(); session.assisted = false; flash('Autopilot off'); }
+
+// The ghost (src/ghost.ts, G): the autopilot's run, worked out in the background while you play and drawn as a
+// see-through figure with a trail. It waits where its timer starts and sets off when yours does (each stage's, on a
+// staged map), then keeps its own pace: a line to follow.
+let ghost: Ghost | null = null, ghostKey = '', gi = -1, gGo = false; // gi: the pose shown (-1: none); gGo: going with you
+const ghostKeyNow = () => `${session.def.id}@${settings.tickrate}${custom() ? ' ' + MOVEMENT.map(k => settings[k]).join() : ''}`;
+function ghostWork(ms: number) { // a few ms a frame: it keeps well ahead of you
+  if (!settings.ghost) return;
+  if (ghostKey !== ghostKeyNow()) { ghostKey = ghostKeyNow(); ghost = ghostOf(session, !custom()); gi = -1; gGo = false; }
+  for (const t = performance.now() + ms; ghost && !ghost.done && performance.now() < t;) ghost.step(16);
+}
+function ghostSync(r0: string, s0: string) { // after each of your ticks
+  if (!ghost) return;
+  const staged = !!session.def.stages, t = staged ? session.stage : session.run, was = staged ? s0 : r0, at = ghost.sync[staged ? session.stage.index : 0] ?? -1;
+  if (t.state === 'idle') { gi = -1; gGo = false; } // restarted
+  else if (t.state === 'ready' || (t.state === 'running' && was !== 'running')) { gi = at; gGo = t.state === 'running' && at >= 0; }
+  else if (gGo) gi++;
+}
+function toggleGhost() {
+  settings.ghost = !settings.ghost;
+  store.set('surf.settings', settings);
+  if (!settings.ghost) return flash('Ghost off');
+  ghostWork(0);
+  const p = ghost?.planned;
+  flash(!ghost ? 'Ghost: this map has no autopilot route' : `Ghost: the autopilot's ${p ? `planned run${p.stage === undefined ? '' : ` through stage ${p.stage + 1}`}, ${fmt(p.time)}` : 'line'}\nit sets off when your timer starts (G hides it)`, 4000);
+}
 
 // ---------------------------------------------------------------- events, HUD
 
@@ -589,10 +659,10 @@ const NUMS: [keyof Settings, string, number][] = [
   ['maxspeed', 'Max speed', 1], ['maxvelocity', 'Max velocity (per axis)', 50], ['jumpImpulse', 'Jump impulse', 0.1],
   ['sensitivity', 'Mouse sensitivity (× 0.022°/count)', 0.05], ['fov', 'FOV (horizontal at 4:3)', 1],
 ];
-const BOOLS: [keyof Settings, string][] = [['rampfix', 'Rampbug fix (no dead stops on ramps, as on surf servers)'], ['bhopLimiter', 'Bunnyhop speed limiter (1.1 × max speed on jump)'], ['autobhop', 'Auto-bunnyhop (hold jump)'], ['trail', 'Rainbow trail (always on; some maps hand one out)']];
+const BOOLS: [keyof Settings, string][] = [['rampfix', 'Rampbug fix (no dead stops on ramps, as on surf servers)'], ['bhopLimiter', 'Bunnyhop speed limiter (1.1 × max speed on jump)'], ['autobhop', 'Auto-bunnyhop (hold jump)'], ['trail', 'Rainbow trail (always on; some maps hand one out)'], ['ghost', "Ghost (G): the autopilot's run as a figure to follow, setting off with your timer"]];
 const CONTROLS = [['Click', 'capture mouse'], ['W A S D', 'move / strafe'], ['Mouse', 'look'], ['Space / wheel', 'jump'], ['Ctrl', 'duck'],
   ['R', 'restart run'], ['C / V', 'save / load practice checkpoint (invalidates timer)'], ['N', 'noclip (Space/Ctrl up/down, Shift fast)'],
-  ['P', 'autopilot demo'], ['E', 'save the last finished run as a file'], ['F3', 'debug overlay'], ['Esc', 'menu']];
+  ['P', 'autopilot demo'], ['G', "ghost: the autopilot's run, to follow"], ['E', 'save the last finished run as a file'], ['F3', 'debug overlay'], ['Esc', 'menu']];
 
 const bar = (v: number) => `<i class="bar" style="--f:${(v * 20).toFixed(1)}%"></i>`;
 function level(m: MapDef): [string, string] { // the map list's difficulty: a badge, and the rating's three parts
@@ -625,7 +695,7 @@ function show(screen: Screen | null) {
     panel.innerHTML = `<h1>${d.name}</h1><p>This map isn't hosted here (there's no licence to share it), and downloading it from its original upload didn't work just now. Download <a href="${d.bsp!.own!.get}" target="_blank" rel="noopener">the map</a> yourself and choose the file (the zip as it comes, or the <b>.bsp</b> in it). It's kept in this browser for next time.</p>` +
       `<div class="row"><label class="button primary">Choose the map file…<input type="file" accept=".bsp,.zip" data-pick hidden></label><button data-go="maps">Back</button></div>`;
   } else if (screen === 'pause') {
-    panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-go="maps">Maps</button><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div>`;
+    panel.innerHTML = `<h1>PAUSED</h1><p>${session.def.name}</p><div class="row"><button class="primary" data-act="resume">Resume</button><button data-act="restart">Restart (R)</button><button data-act="ghost">Ghost ${settings.ghost ? 'on' : 'off'} (G)</button><button data-go="maps">Maps</button><button data-go="board">Leaderboard</button><button data-go="settings">Settings</button></div>`;
   } else if (screen === 'board') {
     panel.innerHTML = `<h1>LEADERBOARD</h1><p>Everyone's best full runs at the standard movement settings. Once you've joined, your PBs go up by themselves. Click a time to see its sections.</p>` +
       boardHtml() + `<div class="row"><button data-go="${backTo}">Back</button></div>`;
@@ -656,6 +726,7 @@ $('panel').addEventListener('click', e => {
   if (b.dataset.go) { pick = null; show(b.dataset.go as Screen); }
   if (b.dataset.act === 'resume') { show(null); lock(); }
   if (b.dataset.act === 'restart') { session.restart(); show(null); lock(); }
+  if (b.dataset.act === 'ghost') { toggleGhost(); show('pause'); }
   if (b.dataset.act === 'join') joinBoard((b.parentElement!.querySelector('[data-join]') as HTMLInputElement).value);
   if (b.dataset.act === 'later') { store.set(joinFrom ? 'surf.welcomed' : 'surf.asked', true); asking = false; if (joinFrom) show(joinFrom); else { show(null); lock(); } }
   if (b.dataset.act === 'join-open') { joinFrom = screenNow; show('join'); }
@@ -696,6 +767,7 @@ function tick() {
   rec?.ticks.push([p.yaw, p.pitch, lastCmd.fwd, lastCmd.side, +lastCmd.jump, +lastCmd.duck]);
   session.step(lastCmd);
   if ((session.run.state === 'running' && r0 !== 'running') || (session.stage.state === 'running' && s0 !== 'running')) record(); // a timer just started
+  ghostSync(r0, s0);
   for (const e of session.events.splice(0)) onEvent(e);
 }
 function frame(now: number) {
@@ -704,6 +776,7 @@ function frame(now: number) {
   acc = running() ? Math.min(acc + (now - last) / 1000, 0.25) : 0;
   last = now;
   while (acc >= dt) { acc -= dt; tick(); }
+  ghostWork(running() ? 4 : 12);
   draw(running() ? acc / dt : 1, now);
 }
 function draw(t: number, now: number) {
@@ -716,6 +789,7 @@ function draw(t: number, now: number) {
   skyBox.position.copy(camera.position);
   for (const { tint, m } of pulsing) for (const q of m.pulse) tint.setComponent(q.k, q.min + (q.max - q.min) * (Math.sin((2 * Math.PI * (now / 1000 - q.offset)) / q.period) / 2 + 0.5)); // Source's Sine proxy
   drawTrail(o, now);
+  drawGhost(running() ? t : 1);
   renderer.render(scene, camera);
   for (const e of session.events.splice(0)) onEvent(e); // restart / checkpoint messages
   hud();
@@ -733,7 +807,7 @@ requestAnimationFrame(frame);
 if (import.meta.env.DEV) { // hooks for automated checks in the browser
   Object.assign(window, {
     surf: {
-      get session() { return session; }, get demo() { return demo; }, save: saveDemo, settings, event: onEvent, online, maps: MAPS, three: { THREE, scene, renderer, camera, get world() { return worldGroup; } },
+      get session() { return session; }, get demo() { return demo; }, get ghost() { return { ghost, i: gi, go: gGo }; }, save: saveDemo, settings, event: onEvent, online, maps: MAPS, three: { THREE, scene, renderer, camera, get world() { return worldGroup; } },
       async play(id: string, auto = false) { show(null); await load(MAPS.find(m => m.id === id)!); if (auto) startAutopilot(); },
       cam(pos: Vec, yaw: number, pitch = 0) { const p = session.p; p.noclip = true; session.invalidate(); p.origin = pos; p.vel = [0, 0, 0]; p.yaw = yaw; p.pitch = pitch; session.snap(); draw(1, performance.now()); },
       advance(seconds: number) { for (let i = Math.round(seconds * settings.tickrate); i > 0; i--) tick(); draw(1, performance.now()); }, // runs while rAF is throttled

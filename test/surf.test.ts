@@ -12,6 +12,7 @@ import { type MapDef, type Spawn, Session, buildBrush, inside, rate } from '../s
 import { makeBot } from '../src/bot';
 import { type Demo, replay, replayDemo } from '../src/plan';
 import { RUNS } from '../src/runs';
+import { ghost } from '../src/ghost';
 import * as F from '../src/fmath';
 import { parseBsp, resolveMap, unpack } from '../src/bsp';
 import testMap, { RAMP60 } from '../src/maps/test';
@@ -698,6 +699,22 @@ describe('planned autopilot runs', () => {
         for (const e of s.events.splice(0)) { expect(e.type, `fell at ${(i / +tick).toFixed(2)}s`).not.toBe('fail'); if ((e.type === 'finish' && stage === undefined) || (e.type === 'stage' && e.index === stage)) t = e.type === 'stage' ? s.run.time : e.time; }
       }
       expect(t).toBe(time);
+    }, 120_000);
+  }
+});
+
+// the ghost (src/ghost.ts) is the autopilot's run: from where its timer starts (each stage's, on a staged map), its
+// trace finishes in the planned time
+describe('ghost', () => {
+  for (const [id, tick] of [['utopia', 128], ['stages', 128]] as const) {
+    it(`${id} at ${tick} tick: the planned run's timer starts and its finish`, async () => {
+      const m = await resolveMap(mapDefs.find(d => d.id === id)!), g = ghost(new Session(m, { ...S, tickrate: tick }), true)!;
+      while (!g.done) g.step(1000);
+      expect(g.fell).toBe(false);
+      expect(Object.keys(g.sync).length).toBe(m.stages?.length ?? 1);
+      expect((g.finish - g.sync[0]) / tick).toBe(RUNS[`${id}@${tick}`].time);
+      const [x, y, z] = g.at.subarray(g.finish * 5); // it's in the end zone then
+      expect(inside([x, y, z], m.end ?? m.stages!.at(-1)!.end)).toBe(true);
     }, 120_000);
   }
 });

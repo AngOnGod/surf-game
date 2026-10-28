@@ -304,11 +304,12 @@ export interface Settings {
   friction: number; stopspeed: number; maxspeed: number; maxvelocity: number; jumpImpulse: number;
   bhopLimiter: boolean; autobhop: boolean; rampfix: boolean; sensitivity: number; fov: number;
   trail: boolean; // cosmetic: always show the rainbow trail (otherwise only where a map hands one out)
+  ghost: boolean; // show the autopilot's run as a ghost to follow (src/ghost.ts)
 }
 export const DEFAULTS: Settings = {
   tickrate: 128, gravity: 800, airaccelerate: 150, airMaxWishspeed: 30, accelerate: 5.5, friction: 5.2,
   stopspeed: 80, maxspeed: 250, maxvelocity: 3500, jumpImpulse: Math.sqrt(2 * 800 * 57),
-  bhopLimiter: false, autobhop: true, rampfix: true, sensitivity: 2, fov: 90, trail: false, // surf-server setup: sv_enablebunnyhopping 1, sv_autobunnyhopping 1, a rampbug fix
+  bhopLimiter: false, autobhop: true, rampfix: true, sensitivity: 2, fov: 90, trail: false, ghost: false, // surf-server setup: sv_enablebunnyhopping 1, sv_autobunnyhopping 1, a rampbug fix
 };
 
 /** fwd/side/up are key axes in [-1, 1]; the move code scales them like cl_forwardspeed. */
